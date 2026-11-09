@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using WeldingThozhilalarSangam.Api.Models;
+using WeldingThozhilalarSangam.Api.Services;
 
 namespace WeldingThozhilalarSangam.Api.Data;
 
@@ -13,10 +14,12 @@ public sealed class MongoContext
 
         Users = database.GetCollection<UserRegistration>("Users");
         Districts = database.GetCollection<District>("Districts");
+        PrivateUploads = database.GetCollection<PrivateUploadRecord>("PrivateUploads");
     }
 
     public IMongoCollection<UserRegistration> Users { get; }
     public IMongoCollection<District> Districts { get; }
+    public IMongoCollection<PrivateUploadRecord> PrivateUploads { get; }
 
     public async Task EnsureIndexesAsync()
     {

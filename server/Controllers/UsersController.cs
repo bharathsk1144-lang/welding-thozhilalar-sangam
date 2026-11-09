@@ -18,7 +18,8 @@ public sealed class UsersController : ControllerBase
     private static readonly TimeSpan LoginLockoutWindow = TimeSpan.FromMinutes(5);
     private const int MaxLoginAttempts = 5;
     private readonly IWebHostEnvironment _environment;
-    private readonly PrivateUploadStorage _uploads;
+    private readonly IPrivateUploadStorage _uploads;
+    private readonly ILogger<UsersController> _logger;
     private readonly OtpService _otpService;
     private readonly bool _registrationOtpEnabled;
     private readonly DistrictService _districtService;
@@ -32,11 +33,13 @@ public sealed class UsersController : ControllerBase
         DistrictService districtService,
         UserService userService,
         UserSessionService sessions,
-        PrivateUploadStorage uploads,
+        IPrivateUploadStorage uploads,
+        ILogger<UsersController> logger,
         IConfiguration configuration)
     {
         _environment = environment;
         _uploads = uploads;
+        _logger = logger;
         _otpService = otpService;
         _registrationOtpEnabled = configuration.GetValue("Authentication:OtpEnabled", true);
         _districtService = districtService;
@@ -67,10 +70,15 @@ public sealed class UsersController : ControllerBase
             return BadRequest(new { message = "OTP verification is required before registration." });
         }
 
-        var aadhaarPath = await SaveUploadAsync(request.AadhaarPhoto!, "aadhaar");
-        var profilePath = await SaveUploadAsync(request.ProfilePhoto!, "profile");
+        string? aadhaarPath = null;
+        string? profilePath = null;
+        UserRegistration user;
+        try
+        {
+            aadhaarPath = await _uploads.SaveAsync(request.AadhaarPhoto!, "aadhaar", HttpContext.RequestAborted);
+            profilePath = await _uploads.SaveAsync(request.ProfilePhoto!, "profile", HttpContext.RequestAborted);
 
-        var user = new UserRegistration
+        user = new UserRegistration
         {
             Username = string.IsNullOrWhiteSpace(request.Username) ? request.PhoneNumber.Trim() : request.Username.Trim(),
             PhoneNumber = request.PhoneNumber.Trim(),
@@ -89,7 +97,14 @@ public sealed class UsersController : ControllerBase
             ConsentAccepted = request.ConsentAccepted
         };
 
-        await _userService.CreateAsync(user);
+            await _userService.CreateAsync(user);
+        }
+        catch
+        {
+            await TryDeleteAsync(profilePath);
+            await TryDeleteAsync(aadhaarPath);
+            throw;
+        }
         var session = _sessions.Create(user);
 
         var memberIdView = await _userService.PresentAsync(new MemberIdView(user.MemberId));
@@ -268,6 +283,28 @@ public sealed class UsersController : ControllerBase
         return Ok(await _userService.PresentAsync(ToIdCardDto(user)));
     }
 
+    [Authorize(Policy = "MemberOrAdmin")]
+    [HttpGet("{id}/officer-signatures/{officer}")]
+    public async Task<IActionResult> GetOfficerSignature(string id, string officer)
+    {
+        if (!User.IsInRole("Admin") && User.FindFirstValue(ClaimTypes.NameIdentifier) != id) return Forbid();
+        if (await _userService.GetIdCardUserAsync(id) is null) return NotFound();
+        var filename = officer switch
+        {
+            "president" => "state-president-signature.png",
+            "secretary" => "state-secretary-signature.png",
+            "treasurer" => "state-treasurer-signature.png",
+            _ => null
+        };
+        if (filename is null) return NotFound();
+        var path = Path.Combine(_environment.ContentRootPath, "Assets", "OfficerSignatures", filename);
+        if (!System.IO.File.Exists(path)) return NotFound();
+        Response.Headers.CacheControl = "private, no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+        return File(await System.IO.File.ReadAllBytesAsync(path, HttpContext.RequestAborted), "image/png");
+    }
+
     [HttpGet("verify/{**memberId}")]
     [EnableRateLimiting("public-verification")]
     public async Task<IActionResult> VerifyMember(string memberId)
@@ -426,24 +463,16 @@ public sealed class UsersController : ControllerBase
             });
     }
 
+    private async Task TryDeleteAsync(string? reference)
+    {
+        if (reference is null) return;
+        try { await _uploads.DeleteAsync(reference, CancellationToken.None); }
+        catch (Exception ex) { _logger.LogWarning("Registration upload cleanup failed ({ExceptionType}).", ex.GetType().Name); }
+    }
+
     private static void ClearFailedLogin(string phoneNumber)
     {
         LoginAttempts.TryRemove(phoneNumber, out _);
-    }
-
-    private async Task<string> SaveUploadAsync(IFormFile file, string prefix)
-    {
-        var uploadRoot = _uploads.RootPath;
-        Directory.CreateDirectory(uploadRoot);
-
-        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var fileName = $"{prefix}-{Guid.NewGuid():N}{extension}";
-        var absolutePath = Path.Combine(uploadRoot, fileName);
-
-        await using var stream = System.IO.File.Create(absolutePath);
-        await file.CopyToAsync(stream);
-
-        return $"/uploads/{fileName}";
     }
 
     private static UserDetailsDto ToDetailsDto(UserRegistration user)

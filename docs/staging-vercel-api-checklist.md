@@ -1,5 +1,7 @@
 # November 7 client testing link: staging preparation
 
+Historical checklist for the earlier Vercel/paid-disk plan. The current free-tier deployment uses Cloudflare Pages, Render Free, and authenticated Cloudinary storage; do not use the upload-mount steps below. Follow [private cloud storage and recovery gates](private-cloud-storage-runbook.md).
+
 This repository is prepared for a Vercel frontend and a separate ASP.NET Core API. No account, service, database, DNS record, deployment, or client link has been created by this preparation. Use synthetic member details and synthetic image files only.
 
 ## Repository settings ready for staging
@@ -28,7 +30,7 @@ This repository is prepared for a Vercel frontend and a separate ASP.NET Core AP
 - The configured SMS sender does not deliver production OTP. Forgot-password recovery therefore remains unavailable until an approved provider and controlled delivery test exist, even for previously verified mobiles.
 - Unverified mobiles have no self-service ownership-verification flow yet. Their password login works; OTP password recovery remains blocked until a separately verified process sets `MobileVerified=true`.
 - Seeded district WhatsApp links are placeholders. Approved real links and a privacy-safe test group are still required for full end-to-end client registration testing.
-- The server targets .NET 8, whose support ends November 10, 2026. Plan and test an upgrade to a supported runtime promptly. The transitive SharpCompress advisory noted in `docs/deployment-guide.md` also needs a reviewed dependency resolution before a production launch.
+- The isolated release targets .NET 10 and MongoDB Driver 3.13; the transitive SharpCompress version is 0.48.1. The synthetic backend checks passed after the upgrade. Live Cloudinary privacy and isolated restore are still required before a production launch.
 - Official-domain DNS changes, real Aadhaar uploads, production data copy, deployment, and client access remain outside this preparation.
 
 Platform references: [Vercel Vite](https://vercel.com/docs/frameworks/frontend/vite), [Vercel rewrites](https://vercel.com/docs/routing/rewrites), [Render Docker](https://render.com/docs/docker), [Render persistent disks](https://render.com/docs/disks), [MongoDB Atlas connection prerequisites](https://www.mongodb.com/docs/atlas/connect-to-database-deployment/), [Microsoft .NET lifecycle](https://learn.microsoft.com/en-ie/lifecycle/products/microsoft-net-and-net-core).

@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.StaticFiles;
 using MongoDB.Driver;
 using WeldingThozhilalarSangam.Api.Data;
 using WeldingThozhilalarSangam.Api.Services;
@@ -12,7 +11,7 @@ namespace WeldingThozhilalarSangam.Api.Controllers;
 [ApiController]
 [Route("uploads")]
 [Authorize(Policy = "MemberOrAdmin")]
-public sealed class UploadsController(MongoContext mongo, PrivateUploadStorage uploads) : ControllerBase
+public sealed class UploadsController(MongoContext mongo, IPrivateUploadStorage uploads) : ControllerBase
 {
     [HttpGet("{filename}")]
     public async Task<IActionResult> Read(string filename)
@@ -31,17 +30,23 @@ public sealed class UploadsController(MongoContext mongo, PrivateUploadStorage u
         else
         {
             // A legacy file referenced by multiple records must never expose a private document.
-            if (await mongo.Users.Find(privateDocument).AnyAsync() || !await mongo.Users.Find(filter.And(
+            var isPrivateDocument = await mongo.Users.Find(privateDocument).AnyAsync();
+            var ownsProfile = await mongo.Users.Find(filter.And(
                 filter.Eq(u => u.Id, User.FindFirstValue(ClaimTypes.NameIdentifier)),
-                filter.Eq(u => u.ProfilePhotoPath, reference))).AnyAsync()) return Forbid();
+                filter.Eq(u => u.ProfilePhotoPath, reference))).AnyAsync();
+            if (!UploadAccessRules.MemberCanRead(ownsProfile, isPrivateDocument)) return Forbid();
         }
-        var root = uploads.RootPath;
-        var path = Path.GetFullPath(Path.Combine(root, filename));
-        if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) || !System.IO.File.Exists(path))
-            return NotFound();
-        new FileExtensionContentTypeProvider().TryGetContentType(path, out var contentType);
+        var upload = await uploads.ReadAsync(filename, HttpContext.RequestAborted);
+        if (upload is null) return NotFound();
         Response.Headers.CacheControl = "private, no-store";
         Response.Headers["X-Content-Type-Options"] = "nosniff";
-        return PhysicalFile(path, contentType ?? "application/octet-stream");
+        Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+        return File(upload.Bytes, upload.ContentType);
     }
+}
+
+public static class UploadAccessRules
+{
+    public static bool MemberCanRead(bool ownsProfile, bool isPrivateDocument) =>
+        ownsProfile && !isPrivateDocument;
 }

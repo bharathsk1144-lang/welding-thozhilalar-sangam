@@ -1,5 +1,6 @@
 import { forwardRef } from 'react';
 import ProtectedImage from './ProtectedImage.jsx';
+import ProtectedOfficerSignature from './ProtectedOfficerSignature.jsx';
 import OrganizationContactIcon from './OrganizationContactIcon.jsx';
 import { branding, officeAddressText, organizationContactRows } from '../config/branding.js';
 import { memberIdDisplay, memberIdFilePart } from '../api/memberId.js';
@@ -19,7 +20,7 @@ function CardBrand() {
       <img src={branding.logo} alt="Sangam crest" width="64" height="64" />
       <div className="pass-brand__names"><span>{branding.nameEnglish}</span><strong lang="ta">{branding.nameTamil}</strong></div>
     </div>
-    <section className="pass-office" aria-label="Organization office address"><p>{officeAddressText()}</p>{branding.phone && <span>{branding.phone}</span>}{branding.email && <span>{branding.email}</span>}</section>
+    <section className="pass-office" aria-label="Organization office address"><p>{officeAddressText().split(/\r?\n/).map((line) => <span key={line}>{line}</span>)}</p>{branding.phone && <span>{branding.phone}</span>}{branding.email && <span>{branding.email}</span>}</section>
   </header>;
 }
 
@@ -41,13 +42,16 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
         </dl>
         <p className="pass-member-status">{text(card.status, 'Member')}{card.verificationStatus && <> · {card.verificationStatus}</>}</p>
         <div className="pass-signatures" aria-label="Reserved officer signature areas">
-          {[['தலைவர்', 'President'], ['செயலாளர்', 'Secretary']].map(([tamil, english]) => (
-            <div key={english}><i /><strong lang="ta">{tamil}</strong><small>{english}</small></div>
-          ))}
-          <div className="pass-signatures__treasurer">
-            <img src="/signatures/state-treasurer-signature.png" alt="State Treasurer signature" />
-            <i /><strong lang="ta">S.விக்னேஷ்</strong><small lang="ta">மாநில பொருளாளர்</small><small>State Treasurer</small>
-          </div>
+          {[
+            ['president', 'முரளி', 'மாநில தலைவர்', 'State President'],
+            ['secretary', 'கே. சங்கர்', 'மாநில செயலாளர்', 'State Secretary'],
+            ['treasurer', 'எஸ். விக்னேஷ்', 'மாநில பொருளாளர்', 'State Treasurer']
+          ].map(([officer, name, roleTamil, roleEnglish]) =>
+            <div className={`pass-signatures__${officer}`} key={officer}>
+              <ProtectedOfficerSignature officer={officer} ownerId={card.id} />
+              <i /><strong lang="ta">{name}</strong><small lang="ta">{roleTamil}</small><small>{roleEnglish}</small>
+            </div>
+          )}
         </div>
         <footer className="pass-footer">PRIVATE UNION MEMBERSHIP CARD</footer>
       </article>
@@ -80,6 +84,7 @@ async function ready(root) {
     if (Date.now() > deadline) throw new Error('Passport photo is still loading. Please retry.');
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  if (root.querySelector('[data-signature-unavailable="true"]')) throw new Error('Officer signature is unavailable. Please retry.');
   if (document.fonts) await Promise.race([document.fonts.ready, new Promise((resolve) => setTimeout(resolve, 3000))]);
   await Promise.all([...root.querySelectorAll('img')].map((img) => {
     if (img.complete) return Promise.resolve();

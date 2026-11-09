@@ -14,7 +14,8 @@ export default defineConfig({
   define: { __WTS_PREVIEW_DEMO__: JSON.stringify(process.env.WTS_CLIENT_PREVIEW_DEMO === 'true') },
   resolve: { alias: [
     { find: /^\.\.\/components\/MembershipStatistics\.jsx$/, replacement: local('./preview/PreviewStatistics.jsx') },
-    { find: /^\.\/ProtectedImage\.jsx$/, replacement: local('./preview/DemoPassport.jsx') }
+    { find: /^\.\/ProtectedImage\.jsx$/, replacement: local('./preview/DemoPassport.jsx') },
+    { find: /^\.\/ProtectedOfficerSignature\.jsx$/, replacement: local('./preview/DemoSignature.jsx') }
   ] },
   plugins: [react(), {
     name: 'wts-public-preview-isolation',

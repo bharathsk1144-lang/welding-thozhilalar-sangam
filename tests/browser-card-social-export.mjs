@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -25,6 +25,13 @@ const mock = createServer((request, response) => {
   }
   if (request.method === 'GET' && request.url === '/api/auth/registration-options') {
     response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ otpEnabled: registrationOtpEnabled })); return;
+  }
+  const signature = request.url?.match(new RegExp(`^/api/users/${card.id}/officer-signatures/(president|secretary|treasurer)$`));
+  if (request.method === 'GET' && signature) {
+    response.setHeader('Content-Type', 'image/png');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.end(readFileSync(path.join(root, 'server', 'Assets', 'OfficerSignatures', `state-${signature[1]}-signature.png`)));
+    return;
   }
   if (request.method !== 'GET' || request.url !== `/api/users/${card.id}/id-card`) {
     unexpectedRequests++; response.writeHead(405); response.end(); return;
@@ -181,6 +188,8 @@ try {
             const r = icon.getBoundingClientRect(); return { label: icon.getAttribute('aria-label'), x:r.x-bounds.x, y:r.y-bounds.y, width:r.width, height:r.height };
           }), content: [
             [0, '.pass-brand__names', 'Official names'], [0, '.pass-office p', 'Front office address'],
+            [0, '.pass-signatures__president img', 'State President signature'],
+            [0, '.pass-signatures__secretary img', 'State Secretary signature'],
             [0, '.pass-signatures__treasurer img', 'State Treasurer signature'],
             [1, '.pass-address dd', 'Member house address'],
             [1, '.pass-organization-contact dl > div:nth-child(2) dd', 'Tamil Facebook name'],
@@ -203,11 +212,20 @@ try {
     assert.ok(await evaluate("!/(Instagram|Facebook|YouTube|Website):/.test(document.querySelector('.pass-organization-contact').textContent)"));
     assert.equal(await evaluate("document.querySelectorAll('.pass-organization-contact a').length"), 0, 'no invented social profile links');
     assert.equal(await evaluate("document.querySelector('.pass-address dd').textContent"), card.permanentAddress);
-    assert.equal(await evaluate("document.querySelector('.member-pass--front .pass-office p').textContent"), scenario.office || '146 C1, VELAYUDHA NAGAR,\nT.PALUR MAIN ROAD,\nJAYANKONDAM,\nARIYALUR DISTRICT - 621802');
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-office > span')].map(node => node.textContent)"), ['7373605560', 'rksankar73@gmail.com']);
-    assert.ok(await evaluate("document.querySelector('.pass-signatures__treasurer img').complete && document.querySelector('.pass-signatures__treasurer img').naturalWidth > 0"));
-    assert.equal(await evaluate("document.querySelector('.pass-signatures__treasurer strong').textContent"), 'S.விக்னேஷ்');
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-signatures__treasurer small')].map(node => node.textContent)"), ['மாநில பொருளாளர்', 'State Treasurer']);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.member-pass--front .pass-office p > span')].map(node => node.textContent)"), scenario.office ? scenario.office.split('\n') : [
+      '146 C1, Velayudha Nagar, T. Palur Main Road', 'Jayankondam, Ariyalur District – 621802'
+    ]);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-office > span')].map(node => node.textContent)"), ['7373605560']);
+    if (!scenario.office) assert.ok(await evaluate(`(() => {
+      const lines = [...document.querySelectorAll('.member-pass--front .pass-office p > span')];
+      return lines.length === 2 && lines.every(line => line.getBoundingClientRect().height <= parseFloat(getComputedStyle(line).lineHeight) + 1 && line.scrollWidth <= line.clientWidth);
+    })()`), 'approved office address fits exactly two visual lines');
+    assert.ok(await until(() => evaluate("[...document.querySelectorAll('.pass-signatures img')].length === 3 && [...document.querySelectorAll('.pass-signatures img')].every(img => img.complete && img.naturalWidth > 0)"), 'three authenticated officer signature images'));
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-signatures > div')].map(node => [node.querySelector('strong').textContent, ...[...node.querySelectorAll('small')].map(x => x.textContent)])"), [
+      ['முரளி', 'மாநில தலைவர்', 'State President'],
+      ['கே. சங்கர்', 'மாநில செயலாளர்', 'State Secretary'],
+      ['எஸ். விக்னேஷ்', 'மாநில பொருளாளர்', 'State Treasurer']
+    ]);
     assert.ok(await evaluate("!document.querySelector('.pass-president') && !document.querySelector('.membership-card').textContent.includes('President’s Home Address') && !document.querySelector('.membership-card').textContent.includes(\"President's Home Address\")"), 'President home address section is absent from both card sides');
     assert.ok(await evaluate("!document.querySelector('.member-pass--back .pass-office')"), 'no office address section remains on the back');
     if (!scenario.approved && scenario.president) assert.ok(await evaluate(`!document.querySelector('.membership-card').textContent.includes(${JSON.stringify(scenario.president)})`), 'unapproved President address is not rendered');

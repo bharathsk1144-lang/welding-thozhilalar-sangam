@@ -178,6 +178,13 @@ public sealed class UserService
         return result.MatchedCount > 0;
     }
 
+    public Task<bool> IsUploadReferencedAsync(string reference)
+    {
+        var filter = Builders<UserRegistration>.Filter;
+        return _context.Users.Find(filter.Or(filter.Eq(u => u.AadhaarPhotoPath, reference),
+            filter.Eq(u => u.ProfilePhotoPath, reference), filter.Eq(u => u.PaymentProofUrl, reference))).AnyAsync();
+    }
+
     public async Task<UserRegistration?> VerifyPaymentAsync(string userId, string verifiedBy)
     {
         var user = await GetByIdAsync(userId);
