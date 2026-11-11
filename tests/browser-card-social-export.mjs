@@ -188,6 +188,7 @@ try {
             const r = icon.getBoundingClientRect(); return { label: icon.getAttribute('aria-label'), x:r.x-bounds.x, y:r.y-bounds.y, width:r.width, height:r.height };
           }), content: [
             [0, '.pass-brand__names', 'Official names'], [0, '.pass-office p', 'Front office address'],
+            [0, '.pass-office > span:last-child', 'Official office email'],
             [0, '.pass-signatures__president img', 'State President signature'],
             [0, '.pass-signatures__secretary img', 'State Secretary signature'],
             [0, '.pass-signatures__treasurer img', 'State Treasurer signature'],
@@ -215,16 +216,19 @@ try {
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.member-pass--front .pass-office p > span')].map(node => node.textContent)"), scenario.office ? scenario.office.split('\n') : [
       '146 C1, Velayudha Nagar, T. Palur Main Road', 'Jayankondam, Ariyalur District – 621802'
     ]);
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-office > span')].map(node => node.textContent)"), ['7373605560']);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-office > span')].map(node => node.textContent)"),
+      ['7373605560', 'weldingthozhilargalsangam@gmail.com']);
+    assert.equal(await evaluate("document.querySelector('.site-footer a[href^=\"mailto:\"]')?.textContent"),
+      'weldingthozhilargalsangam@gmail.com');
     if (!scenario.office) assert.ok(await evaluate(`(() => {
       const lines = [...document.querySelectorAll('.member-pass--front .pass-office p > span')];
       return lines.length === 2 && lines.every(line => line.getBoundingClientRect().height <= parseFloat(getComputedStyle(line).lineHeight) + 1 && line.scrollWidth <= line.clientWidth);
     })()`), 'approved office address fits exactly two visual lines');
     assert.ok(await until(() => evaluate("[...document.querySelectorAll('.pass-signatures img')].length === 3 && [...document.querySelectorAll('.pass-signatures img')].every(img => img.complete && img.naturalWidth > 0)"), 'three authenticated officer signature images'));
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-signatures > div')].map(node => [node.querySelector('strong').textContent, ...[...node.querySelectorAll('small')].map(x => x.textContent)])"), [
-      ['முரளி', 'மாநில தலைவர்', 'State President'],
-      ['கே. சங்கர்', 'மாநில செயலாளர்', 'State Secretary'],
-      ['எஸ். விக்னேஷ்', 'மாநில பொருளாளர்', 'State Treasurer']
+      ['A. முரளி', 'மாநில தலைவர்', 'State President'],
+      ['K. சங்கர்', 'மாநில செயலாளர்', 'State Secretary'],
+      ['S. விக்னேஷ்', 'மாநில பொருளாளர்', 'State Treasurer']
     ]);
     assert.ok(await evaluate("!document.querySelector('.pass-president') && !document.querySelector('.membership-card').textContent.includes('President’s Home Address') && !document.querySelector('.membership-card').textContent.includes(\"President's Home Address\")"), 'President home address section is absent from both card sides');
     assert.ok(await evaluate("!document.querySelector('.member-pass--back .pass-office')"), 'no office address section remains on the back');

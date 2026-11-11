@@ -41,6 +41,7 @@ a:hover { color: var(--maroon); }
 .footer-identity p { font-size: 11px; margin-top: 14px; }
 .site-footer h2 { color: #fff2d1; font-size: 13px; margin: 0 0 18px; line-height: 1.8; }
 .site-footer a { display: block; color: #c8c7bf; margin-bottom: 12px; font-size: 12px; font-weight: 400; }
+.site-footer a[href^="mailto:"] { overflow-wrap: anywhere; }
 .site-footer a:hover { color: var(--gold); }
 .footer-bottom { grid-column: 1 / -1; border-top: 1px solid #ffffff21; padding-top: 22px; margin-top: 12px; display: flex; justify-content: space-between; gap: 20px; font-size: 10px; }
 .eyebrow { font-size: 10px; letter-spacing: 1.7px; color: var(--maroon); font-weight: 700; line-height: 1.9; }

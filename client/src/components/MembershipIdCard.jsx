@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 import ProtectedImage from './ProtectedImage.jsx';
 import ProtectedOfficerSignature from './ProtectedOfficerSignature.jsx';
 import OrganizationContactIcon from './OrganizationContactIcon.jsx';
-import { branding, officeAddressText, organizationContactRows } from '../config/branding.js';
+import { branding, officeAddressText, officeBearers, organizationContactRows } from '../config/branding.js';
 import { memberIdDisplay, memberIdFilePart } from '../api/memberId.js';
 
 const text = (value, missing = 'Not recorded') => String(value ?? '').trim() || missing;
@@ -42,11 +42,7 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
         </dl>
         <p className="pass-member-status">{text(card.status, 'Member')}{card.verificationStatus && <> · {card.verificationStatus}</>}</p>
         <div className="pass-signatures" aria-label="Reserved officer signature areas">
-          {[
-            ['president', 'முரளி', 'மாநில தலைவர்', 'State President'],
-            ['secretary', 'கே. சங்கர்', 'மாநில செயலாளர்', 'State Secretary'],
-            ['treasurer', 'எஸ். விக்னேஷ்', 'மாநில பொருளாளர்', 'State Treasurer']
-          ].map(([officer, name, roleTamil, roleEnglish]) =>
+          {officeBearers.map(({ officer, name, roleTamil, roleEnglish }) =>
             <div className={`pass-signatures__${officer}`} key={officer}>
               <ProtectedOfficerSignature officer={officer} ownerId={card.id} />
               <i /><strong lang="ta">{name}</strong><small lang="ta">{roleTamil}</small><small>{roleEnglish}</small>
