@@ -21,15 +21,23 @@ foreach ($name in $names) {
 }
 
 $env:WTS_CLOUDINARY_LIVE_TEST = '1'
+$restoreTool = Join-Path $root 'artifacts\mongodb-tools\extracted\mongodb-database-tools-windows-x86_64-100.20.1\bin\mongorestore.exe'
+if (Test-Path -LiteralPath $restoreTool -PathType Leaf) { $env:WTS_CLOUDINARY_RESTORE_DRILL = '1' }
+$testExitCode = 0
 try {
     Push-Location $root
     try {
         dotnet run --project tests/PrivateStorageChecks/PrivateStorageChecks.csproj -c Release --no-restore
-        if ($LASTEXITCODE -ne 0) { throw "Live Cloudinary test failed (exit code $LASTEXITCODE)." }
+        $testExitCode = $LASTEXITCODE
     }
     finally { Pop-Location }
 }
 finally {
     Remove-Item Env:WTS_CLOUDINARY_LIVE_TEST -ErrorAction SilentlyContinue
+    Remove-Item Env:WTS_CLOUDINARY_RESTORE_DRILL -ErrorAction SilentlyContinue
     foreach ($name in $names) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+}
+if ($testExitCode -ne 0) {
+    [Console]::Error.WriteLine("Live Cloudinary test failed (exit code $testExitCode).")
+    exit 1
 }

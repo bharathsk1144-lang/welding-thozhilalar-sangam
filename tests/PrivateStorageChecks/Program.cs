@@ -12,7 +12,7 @@ var index = new MemoryIndex();
 var handler = new CloudHandler();
 var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
 {
-    ["Cloudinary:CloudName"] = "synthetic",
+    ["Cloudinary:CloudName"] = " synthetic ",
     ["Cloudinary:ApiKey"] = "test-key",
     ["Cloudinary:ApiSecret"] = "test-secret"
 }).Build();
@@ -49,31 +49,51 @@ var file = new FormFile(new MemoryStream(bytes), 0, bytes.Length, "file", "synth
 { Headers = new HeaderDictionary(), ContentType = "image/png" };
 var reference = await storage.SaveAsync(file, "profile");
 Check(reference.StartsWith("/uploads/profile-") && !reference.Contains("asset-synthetic"), "opaque reference");
-Check(handler.UploadPath == "/v1_1/synthetic/image/authenticated", "authenticated upload endpoint");
+Check(handler.UploadPath == "/v1_1/synthetic/image/upload" && handler.AuthenticatedTypeUsed,
+    "authenticated image upload endpoint and delivery type");
 Check(index.Records.Count == 1, "durable mapping");
 var secondInstance = new CloudinaryPrivateUploadStorage(new HttpClient(handler), index, config);
 var retrieved = await secondInstance.ReadAsync(Path.GetFileName(reference));
 Check(retrieved?.Bytes.SequenceEqual(bytes) == true, "read after service recreation");
 Check(handler.DownloadUsedPost && handler.BasicAuthUsed, "server-authenticated download");
 await storage.DeleteAsync(reference);
-Check(index.Records.Count == 0 && handler.DestroyCount == 1, "remote delete and mapping removal");
+Check(index.Records.Count == 0 && handler.DestroyCount == 1 && handler.DestroyUsesPublicId,
+    "authenticated public-ID deletion and mapping removal");
 var pdfBytes = Encoding.ASCII.GetBytes("%PDF-1.4 synthetic");
 var pdf = new FormFile(new MemoryStream(pdfBytes), 0, pdfBytes.Length, "file", "synthetic.pdf")
 { Headers = new HeaderDictionary(), ContentType = "application/pdf" };
 var pdfReference = await storage.SaveAsync(pdf, "payment-proof");
-Check(handler.UploadPath == "/v1_1/synthetic/raw/authenticated", "private raw PDF upload endpoint");
+Check(handler.UploadPath == "/v1_1/synthetic/raw/upload" && handler.AuthenticatedTypeUsed,
+    "authenticated raw PDF upload endpoint and delivery type");
 await storage.DeleteAsync(pdfReference);
 Check(index.Records.Count == 0, "PDF mapping cleanup");
 handler.FailUpload = true;
 try { await storage.SaveAsync(file, "aadhaar"); throw new Exception("Upload failure was accepted"); }
-catch (HttpRequestException) { Check(index.Records.Count == 0, "upload failure creates no mapping"); }
+catch (HttpRequestException ex)
+{
+    Check(index.Records.Count == 0 && ex.Message.Contains("category api-secret-mismatch") &&
+        !ex.Message.Contains("private-test-marker"), "upload failure is sanitized and creates no mapping");
+}
 handler.FailUpload = false;
 index.FailAdd = true;
 try { await storage.SaveAsync(file, "aadhaar"); throw new Exception("Index failure was accepted"); }
 catch (InvalidOperationException) { Check(handler.DestroyCount == 3, "index failure destroys remote asset"); }
 Console.WriteLine("Private storage checks passed: authenticated image/PDF upload, download, opaque references, recreation, deletion, upload failure, mapping rollback, access rules, and production local-storage rejection.");
 if (Environment.GetEnvironmentVariable("WTS_CLOUDINARY_LIVE_TEST") == "1")
-    await CloudinaryLiveChecks.RunAsync();
+{
+    try { await CloudinaryLiveChecks.RunAsync(); }
+    catch (Exception ex)
+    {
+        // Provider and transport errors can contain private URLs. Only the storage adapter's
+        // controlled status/category message is safe to print; stack frames contain no arguments.
+        var safe = System.Text.RegularExpressions.Regex.Match(ex.Message,
+            @"^Cloudinary (upload|download|destroy) failed: HTTP [0-9]{3}, category [a-z-]+\.$");
+        Console.Error.WriteLine(safe.Success ? $"Live Cloudinary check failed: {safe.Value}" :
+            $"Live Cloudinary check failed: {ex.GetType().Name} (details redacted).");
+        Console.Error.WriteLine(ex.StackTrace);
+        Environment.ExitCode = 1;
+    }
+}
 
 static void Check(bool condition, string label)
 {
@@ -103,22 +123,34 @@ sealed class CloudHandler : HttpMessageHandler
 {
     public bool FailUpload { get; set; }
     public string UploadPath { get; private set; } = "";
+    public bool AuthenticatedTypeUsed { get; private set; }
     public bool DownloadUsedPost { get; private set; }
     public bool BasicAuthUsed { get; private set; }
+    public bool DestroyUsesPublicId { get; private set; }
     public int DestroyCount { get; private set; }
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var path = request.RequestUri!.AbsolutePath;
         BasicAuthUsed = request.Headers.Authorization?.Scheme == "Basic";
-        if (path.EndsWith("/authenticated"))
+        if (path.EndsWith("/upload"))
         {
             UploadPath = path;
-            if (FailUpload) return new HttpResponseMessage(HttpStatusCode.BadGateway);
+            if (FailUpload)
+            {
+                var failed = new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                { Content = new StringContent("{\"error\":{\"message\":\"api_secret mismatch private-test-marker\"}}") };
+                failed.Headers.TryAddWithoutValidation("X-Cld-Error", "api_secret mismatch private-test-marker");
+                return failed;
+            }
             var body = await request.Content!.ReadAsStringAsync(ct);
-            if (!body.Contains("public_id") || !body.Contains("filename=")) throw new Exception("Upload form missing expected fields");
+            AuthenticatedTypeUsed = (body.Contains("name=\"type\"") || body.Contains("name=type")) &&
+                body.Contains("authenticated");
+            if (request.Method != HttpMethod.Post || request.RequestUri.Host != "api.cloudinary.com" ||
+                !body.Contains("public_id") || !body.Contains("filename=") || !AuthenticatedTypeUsed)
+                throw new Exception("Upload request missing expected fields or endpoint");
             return Json(path.Contains("/raw/") ?
-                "{\"asset_id\":\"asset-synthetic\",\"type\":\"authenticated\",\"resource_type\":\"raw\"}" :
-                "{\"asset_id\":\"asset-synthetic\",\"type\":\"authenticated\",\"resource_type\":\"image\"}");
+                "{\"asset_id\":\"asset-synthetic\",\"public_id\":\"wts-private/synthetic.pdf\",\"type\":\"authenticated\",\"resource_type\":\"raw\"}" :
+                "{\"asset_id\":\"asset-synthetic\",\"public_id\":\"wts-private/synthetic\",\"type\":\"authenticated\",\"resource_type\":\"image\"}");
         }
         if (path.EndsWith("/asset/download"))
         {
@@ -128,6 +160,12 @@ sealed class CloudHandler : HttpMessageHandler
         }
         if (path.EndsWith("/destroy"))
         {
+            if (!path.Contains("/image/") && !path.Contains("/raw/"))
+                throw new Exception("Destroy route missing resource type");
+            var body = await request.Content!.ReadAsStringAsync(ct);
+            DestroyUsesPublicId = body.Contains("public_id=wts-private%2Fsynthetic") &&
+                body.Contains("type=authenticated") && !body.Contains("asset_id=");
+            if (!DestroyUsesPublicId) throw new Exception("Destroy request must use authenticated public ID");
             DestroyCount++;
             return Json("{\"result\":\"ok\"}");
         }

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 using WeldingThozhilalarSangam.Api.Data;
@@ -67,6 +68,7 @@ public sealed class PrivateUploadRecord
     [BsonId]
     public string Filename { get; set; } = string.Empty;
     public string AssetId { get; set; } = string.Empty;
+    public string PublicId { get; set; } = string.Empty;
     public string ResourceType { get; set; } = string.Empty;
 }
 
@@ -94,14 +96,21 @@ public sealed class CloudinaryPrivateUploadStorage : IPrivateUploadStorage
     private readonly HttpClient _http;
     private readonly IPrivateUploadIndex _records;
     private readonly string _cloud;
+    private readonly ILogger<CloudinaryPrivateUploadStorage> _logger;
 
-    public CloudinaryPrivateUploadStorage(HttpClient http, IPrivateUploadIndex records, IConfiguration config)
+    public CloudinaryPrivateUploadStorage(HttpClient http, IPrivateUploadIndex records, IConfiguration config,
+        ILogger<CloudinaryPrivateUploadStorage>? logger = null)
     {
         _http = http;
         _records = records;
-        _cloud = config["Cloudinary:CloudName"] ?? throw new InvalidOperationException("Cloudinary cloud name is required.");
-        var key = config["Cloudinary:ApiKey"] ?? throw new InvalidOperationException("Cloudinary API key is required.");
-        var secret = config["Cloudinary:ApiSecret"] ?? throw new InvalidOperationException("Cloudinary API secret is required.");
+        _logger = logger ?? NullLogger<CloudinaryPrivateUploadStorage>.Instance;
+        _cloud = config["Cloudinary:CloudName"]?.Trim() ?? throw new InvalidOperationException("Cloudinary cloud name is required.");
+        if (_cloud.Length == 0 || _cloud.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
+            throw new InvalidOperationException("Cloudinary cloud name has an invalid format.");
+        var key = config["Cloudinary:ApiKey"]?.Trim() ?? throw new InvalidOperationException("Cloudinary API key is required.");
+        var secret = config["Cloudinary:ApiSecret"]?.Trim() ?? throw new InvalidOperationException("Cloudinary API secret is required.");
+        if (key.Length == 0 || secret.Length == 0)
+            throw new InvalidOperationException("Cloudinary API credentials are required.");
         _http.BaseAddress = new Uri("https://api.cloudinary.com/");
         _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic",
             Convert.ToBase64String(Encoding.UTF8.GetBytes($"{key}:{secret}")));
@@ -116,27 +125,31 @@ public sealed class CloudinaryPrivateUploadStorage : IPrivateUploadStorage
         var content = new StreamContent(file.OpenReadStream());
         content.Headers.ContentType = MediaTypeHeaderValue.Parse(file.ContentType);
         form.Add(content, "file", filename);
-        form.Add(new StringContent($"wts-private/{Guid.NewGuid():N}"), "public_id");
+        form.Add(new StringContent($"wts-private/{prefix}-{Guid.NewGuid():N}"), "public_id");
         form.Add(new StringContent("false"), "overwrite");
-        using var response = await _http.PostAsync($"v1_1/{_cloud}/{resource}/authenticated", form, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        form.Add(new StringContent("authenticated"), "type");
+        using var response = await _http.PostAsync($"v1_1/{_cloud}/{resource}/upload", form, cancellationToken);
+        await EnsureSuccessAsync(response, "upload", resource, cancellationToken);
         using var data = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var root = data.RootElement;
         var assetId = root.GetProperty("asset_id").GetString();
+        var publicId = root.GetProperty("public_id").GetString();
         if (string.IsNullOrWhiteSpace(assetId) || root.GetProperty("type").GetString() != "authenticated" ||
-            root.GetProperty("resource_type").GetString() != resource)
+            root.GetProperty("resource_type").GetString() != resource ||
+            string.IsNullOrWhiteSpace(publicId) || !publicId.StartsWith("wts-private/", StringComparison.Ordinal))
         {
-            if (!string.IsNullOrWhiteSpace(assetId)) await DestroyAsync(assetId, CancellationToken.None);
+            if (!string.IsNullOrWhiteSpace(publicId)) await DestroyAsync(publicId, resource, CancellationToken.None);
             throw new InvalidOperationException("Private upload verification failed.");
         }
         try
         {
-            await _records.AddAsync(new PrivateUploadRecord { Filename = filename, AssetId = assetId, ResourceType = resource }, cancellationToken);
+            await _records.AddAsync(new PrivateUploadRecord
+            { Filename = filename, AssetId = assetId, PublicId = publicId, ResourceType = resource }, cancellationToken);
             return $"/uploads/{filename}";
         }
         catch
         {
-            await DestroyAsync(assetId, CancellationToken.None);
+            await DestroyAsync(publicId, resource, CancellationToken.None);
             throw;
         }
     }
@@ -146,11 +159,13 @@ public sealed class CloudinaryPrivateUploadStorage : IPrivateUploadStorage
         if (!LocalPrivateUploadStorage.SafeName(filename)) return null;
         var record = await _records.FindAsync(filename, cancellationToken);
         if (record is null) return null;
+        if (record.ResourceType is not ("image" or "raw"))
+            throw new InvalidOperationException("Private upload resource type is invalid.");
         using var request = new HttpRequestMessage(HttpMethod.Post, $"v1_1/{_cloud}/asset/download")
         { Content = new FormUrlEncodedContent(new Dictionary<string, string> { ["asset_id"] = record.AssetId }) };
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, "download", record.ResourceType, cancellationToken);
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var output = new MemoryStream();
         var buffer = new byte[81920];
@@ -169,17 +184,72 @@ public sealed class CloudinaryPrivateUploadStorage : IPrivateUploadStorage
         if (reference != $"/uploads/{name}" || !LocalPrivateUploadStorage.SafeName(name)) return;
         var record = await _records.FindAsync(name, cancellationToken);
         if (record is null) return;
-        await DestroyAsync(record.AssetId, cancellationToken);
+        if (record.ResourceType is not ("image" or "raw"))
+            throw new InvalidOperationException("Private upload resource type is invalid.");
+        if (string.IsNullOrWhiteSpace(record.PublicId))
+            throw new InvalidOperationException("Private upload public ID is missing; deletion requires reconciliation.");
+        await DestroyAsync(record.PublicId, record.ResourceType, cancellationToken);
         await _records.RemoveAsync(name, cancellationToken);
     }
 
-    private async Task DestroyAsync(string assetId, CancellationToken cancellationToken)
+    private async Task DestroyAsync(string publicId, string resource, CancellationToken cancellationToken)
     {
-        using var form = new FormUrlEncodedContent(new Dictionary<string, string> { ["asset_id"] = assetId, ["invalidate"] = "true" });
-        using var response = await _http.PostAsync($"v1_1/{_cloud}/destroy", form, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        using var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        { ["public_id"] = publicId, ["type"] = "authenticated", ["invalidate"] = "true" });
+        using var response = await _http.PostAsync($"v1_1/{_cloud}/{resource}/destroy", form, cancellationToken);
+        await EnsureSuccessAsync(response, "destroy", resource, cancellationToken);
         using var data = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var result = data.RootElement.GetProperty("result").GetString();
-        if (result is not ("ok" or "not found")) throw new InvalidOperationException("Private upload deletion failed.");
+        if (result != "ok") throw new InvalidOperationException("Private upload deletion was not confirmed; mapping retained for reconciliation.");
+    }
+
+    private async Task EnsureSuccessAsync(HttpResponseMessage response, string operation, string resource,
+        CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var errorText = string.Empty;
+        if (response.Headers.TryGetValues("X-Cld-Error", out var headers))
+            errorText = string.Join(' ', headers);
+        try
+        {
+            using var data = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken),
+                cancellationToken: cancellationToken);
+            if (data.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object &&
+                error.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+                errorText += " " + message.GetString();
+        }
+        catch (JsonException) { }
+        var category = ClassifyError(errorText, response.StatusCode);
+        // Never log the cloud name, provider text, asset URL, request body or credentials.
+        var route = operation == "download" ? "/v1_1/{cloud_name}/asset/download" :
+            $"/v1_1/{{cloud_name}}/{resource}/{operation}";
+        _logger.LogWarning("Cloudinary {Operation} failed: HTTP {Status}, category {Category}, endpoint POST {Route}",
+            operation, (int)response.StatusCode, category, route);
+        throw new HttpRequestException($"Cloudinary {operation} failed: HTTP {(int)response.StatusCode}, category {category}.",
+            null, response.StatusCode);
+    }
+
+    private static string ClassifyError(string message, System.Net.HttpStatusCode status)
+    {
+        if (message.Contains("api_secret mismatch", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("api secret mismatch", StringComparison.OrdinalIgnoreCase)) return "api-secret-mismatch";
+        if (message.Contains("cloud name", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("cloud_name", StringComparison.OrdinalIgnoreCase)) return "cloud-configuration";
+        if (message.Contains("signature", StringComparison.OrdinalIgnoreCase)) return "invalid-signature";
+        if (message.Contains("timestamp", StringComparison.OrdinalIgnoreCase)) return "invalid-timestamp";
+        if (message.Contains("public_id", StringComparison.OrdinalIgnoreCase)) return "public-id-parameter";
+        if (message.Contains("asset_id", StringComparison.OrdinalIgnoreCase)) return "asset-id-parameter";
+        if (message.Contains("delivery type", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("type", StringComparison.OrdinalIgnoreCase)) return "delivery-type-parameter";
+        if (message.Contains("parameter", StringComparison.OrdinalIgnoreCase)) return "request-parameter";
+        if (message.Contains("api key", StringComparison.OrdinalIgnoreCase) ||
+            status == System.Net.HttpStatusCode.Unauthorized) return "authentication";
+        if (message.Contains("quota", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("limit", StringComparison.OrdinalIgnoreCase)) return "quota";
+        if (message.Contains("format", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("invalid file", StringComparison.OrdinalIgnoreCase)) return "file-validation";
+        if (status == System.Net.HttpStatusCode.NotFound) return "endpoint-or-cloud";
+        if (status == System.Net.HttpStatusCode.Forbidden) return "provider-policy";
+        return "provider-error";
     }
 }
