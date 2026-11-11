@@ -10,13 +10,15 @@ namespace WeldingThozhilalarSangam.Api.Controllers;
 [Route("api/payments")]
 public sealed class PaymentsController : ControllerBase
 {
-    private readonly PrivateUploadStorage _uploads;
+    private readonly IPrivateUploadStorage _uploads;
     private readonly UserService _userService;
+    private readonly ILogger<PaymentsController> _logger;
 
-    public PaymentsController(PrivateUploadStorage uploads, UserService userService)
+    public PaymentsController(IPrivateUploadStorage uploads, UserService userService, ILogger<PaymentsController> logger)
     {
         _uploads = uploads;
         _userService = userService;
+        _logger = logger;
     }
 
     [HttpPost("submit")]
@@ -52,12 +54,27 @@ public sealed class PaymentsController : ControllerBase
             return BadRequest(new { message = proofError });
         }
 
-        var proofUrl = request.PaymentProof is null ? user.PaymentProofUrl : await SaveUploadAsync(request.PaymentProof);
-        var updated = await _userService.SubmitPaymentAsync(user.Id ?? string.Empty, request.PaymentTransactionId, proofUrl);
+        string? newProof = null;
+        bool updated;
+        try
+        {
+            if (request.PaymentProof is not null)
+                newProof = await _uploads.SaveAsync(request.PaymentProof, "payment-proof", HttpContext.RequestAborted);
+            updated = await _userService.SubmitPaymentAsync(user.Id ?? string.Empty, request.PaymentTransactionId, newProof ?? user.PaymentProofUrl);
+        }
+        catch
+        {
+            await TryDeleteAsync(newProof);
+            throw;
+        }
         if (!updated)
         {
+            await TryDeleteAsync(newProof);
             return NotFound(new { message = "Registered user was not found." });
         }
+        if (newProof is not null && !string.IsNullOrWhiteSpace(user.PaymentProofUrl) &&
+            !await _userService.IsUploadReferencedAsync(user.PaymentProofUrl))
+            await TryDeleteAsync(user.PaymentProofUrl);
 
         return Ok(new { message = "Payment details submitted. Verification is pending.", paymentStatus = "Pending" });
     }
@@ -97,18 +114,11 @@ public sealed class PaymentsController : ControllerBase
         return Ok(await _userService.PresentAsync(new PaymentActionResponse("Payment rejected.", user.PaymentStatus, user.MemberId)));
     }
 
-    private async Task<string> SaveUploadAsync(IFormFile file)
+    private async Task TryDeleteAsync(string? reference)
     {
-        var uploadRoot = _uploads.RootPath;
-        Directory.CreateDirectory(uploadRoot);
-
-        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var fileName = $"payment-proof-{Guid.NewGuid():N}{extension}";
-        var absolutePath = Path.Combine(uploadRoot, fileName);
-
-        await using var stream = System.IO.File.Create(absolutePath);
-        await file.CopyToAsync(stream);
-
-        return $"/uploads/{fileName}";
+        if (reference is null) return;
+        try { await _uploads.DeleteAsync(reference, CancellationToken.None); }
+        catch (Exception ex) { _logger.LogWarning("Payment upload cleanup failed ({ExceptionType}).", ex.GetType().Name); }
     }
+
 }

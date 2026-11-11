@@ -1,5 +1,9 @@
 # WTS deployment preparation — no deployment performed
 
+See [private cloud storage and recovery gates](private-cloud-storage-runbook.md) for the Cloudinary provider and Atlas M0 restore procedure.
+
+Current zero-cost deployment target: Cloudflare Pages Free for the frontend, Render Free Docker for the API, Atlas M0 for MongoDB, and Cloudinary Free authenticated assets for private uploads. The options table below records earlier evaluations; its pending-storage descriptions predate the implemented Cloudinary adapter. No external deployment has been performed from this branch.
+
 ## Required decisions
 
 The frontend is static React/Vite. The .NET API needs a persistent running host; MongoDB and private uploads need durable, backed-up storage. Do not deploy the Cloudflare client-preview artifact as the live member application. Keep preview and production build/configuration separate. Official domain: `www.weldingthozhilalarsangam.com`; API hostname/origin and DNS remain unconfigured until approved.
@@ -23,7 +27,7 @@ There is no validated promise of reliable, secure, permanently zero-cost full-st
 
 Use separate preview/development/production environment files and backend secret management. Never put provider credentials, JWT/admin secrets, MongoDB credentials or private paths in VITE variables. Vite values are public browser content. Only approved organization content belongs there.
 
-Prepare production from reviewed source with `npm ci`, frontend tests/build, backend restore/build/publish and approved synthetic regression tests. Use a currently patched supported runtime; .NET 8 ends support on 2026-11-10 ([Microsoft](https://devblogs.microsoft.com/dotnet/dotnet-8-9-end-of-support/)). A framework migration requires a reviewed test run; no automatic production upgrade/deploy is part of this task.
+Prepare production from reviewed source with `npm ci`, frontend tests/build, backend restore/build/publish and approved synthetic regression tests. The isolated release now targets supported .NET 10 and MongoDB Driver 3.13; its transitive SharpCompress 0.48.1 resolves the previously noted advisory. The synthetic backend suite passed after this upgrade. Live Cloudinary privacy and isolated restore remain launch gates.
 
 Production backend requires a random signing key, non-default admin secret/hash, exact HTTPS frontend CORS origins, authenticated MongoDB with TLS for remote access, private durable upload storage and valid reviewed test exclusions. Bind the API behind an HTTPS reverse proxy/load balancer; configure trusted forwarded headers only for the actual proxy, never arbitrary forwarded clients. Keep MongoDB inaccessible to the public internet and least-privilege credentials scoped to its database.
 
@@ -35,15 +39,15 @@ After credentials and hosting are selected, complete `otp-provider-integration-g
 
 ## Prepared templates (not deployed or container-tested)
 
-- `deploy/backend.production.env.example` and `deploy/frontend.production.env.example`: separate production placeholders using the existing configuration names. Enter backend values only in Render private environment settings and public `VITE_` values only in Vercel's Production environment. The existing `backend.env.example` and `frontend.env.example` remain staging templates; never use their staging database or Preview origin for the official domain.
+- `deploy/backend.production.env.example` and `deploy/frontend.production.env.example`: separate production placeholders using the existing configuration names. Enter backend values only in Render private environment settings and public `VITE_` values only in Cloudflare Pages production build settings. The existing `backend.env.example` and `frontend.env.example` remain staging templates; never use their staging database or Preview origin for the official domain.
 - `deploy/backend.env.example`: backend-only database/JWT/admin hash/SMS/storage/CORS/public-statistics settings. Provider remains disabled; Reg.No remains blank. Replace placeholders in a private host secret manager, never React or source control.
-- `deploy/frontend.env.example`: public branding and a placeholder HTTPS staging API origin. Set `VITE_API_BASE_URL` to the actual separate API `/api` URL and allow the exact Vercel Preview origin in backend CORS. Never let production fall back to port 5087.
-- Root `Dockerfile` and `.dockerignore`: non-root .NET 8 API image preparation for a repository-root build context. The ignore file excludes local uploads, environment files, backups and artifacts; the runtime image removes local appsettings defaults. Verify the resulting image/file inventory before release and pin current patched image digests. Docker is unavailable locally, so no container build or host test was performed. The earlier example files remain reference templates.
+- `deploy/frontend.env.example`: public branding and a placeholder HTTPS staging API origin. Set `VITE_API_BASE_URL` to the actual separate API `/api` URL and allow the exact Cloudflare Pages origin in backend CORS. Never let production fall back to port 5087.
+- Root `Dockerfile` and `.dockerignore`: non-root .NET 10 API image preparation for a repository-root build context. The ignore file excludes local uploads, environment files, backups and artifacts; the runtime image removes local appsettings defaults. Verify the resulting image/file inventory before release and pin current patched image digests. Docker is unavailable locally, so no container build or host test was performed. The earlier example files remain reference templates.
 - `deploy/Caddyfile.example`: same-origin static SPA/API/upload proxy and HTTPS/header template. It forwards uploads to the authorized controller; it does not serve private files from disk. The CSP permits self-hosted scripts and image blobs/data needed for card export. Validate on the actual host before activation. Approve TLS/domain/DNS changes first.
 - The API accepts forwarded client IP/protocol only when `ReverseProxy:KnownProxies` explicitly lists the real immediate proxy IP. It trusts one hop and clears default trust lists. Do not list untrusted clients or configure all-network trust. Verify effective client IP/rate limits behind the final proxy; direct local development is unchanged.
 - `/health/live` returns liveness only; `/health/ready` pings MongoDB with a three-second cancellation budget, returns generic 503 if unavailable and no records/secrets. Provider readiness is a separate launch gate; a green database probe does not mean SMS is ready.
 
-For the Vercel frontend and separate staging API, use [the November 7 staging checklist](staging-vercel-api-checklist.md).
+For current free-tier launch gates, use [the private storage runbook](private-cloud-storage-runbook.md). The earlier Vercel staging checklist is retained as historical reference.
 
 Production startup may create missing required indexes and seed configured districts. It never performs canonical backfill automatically; legacy mobile data blocks startup. First startup against a new production namespace therefore needs separate database-write/cutover approval. No production/database startup was executed during preparation.
 

@@ -32,11 +32,9 @@ public static class ProductionConfiguration
         if (string.IsNullOrWhiteSpace(mongo.Username) || string.IsNullOrWhiteSpace(mongo.Password) ||
             string.IsNullOrWhiteSpace(configuration["MongoDb:DatabaseName"]))
             throw new InvalidOperationException("Production requires an authenticated MongoDB connection and explicit database name.");
-        var root = configuration["Uploads:RootPath"];
-        var webRoot = Path.GetFullPath(environment.WebRootPath ?? Path.Combine(environment.ContentRootPath, "wwwroot"));
-        if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root) ||
-            Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar).Equals(webRoot.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) ||
-            Path.GetFullPath(root).StartsWith(webRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Production requires an absolute private Uploads:RootPath outside the webroot.");
+        if (!string.Equals(configuration["Uploads:Provider"], "Cloudinary", StringComparison.OrdinalIgnoreCase) ||
+            new[] { "Cloudinary:CloudName", "Cloudinary:ApiKey", "Cloudinary:ApiSecret" }
+                .Any(key => string.IsNullOrWhiteSpace(configuration[key]) || configuration[key]!.Contains("REPLACE", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Production requires Cloudinary authenticated private storage credentials; local uploads are ephemeral.");
     }
 }

@@ -5,9 +5,9 @@ Full-stack Tamil Nadu district-wise Welding Thozhilalar Sangam membership regist
 ## Stack
 
 - Frontend: React + Vite
-- Backend: ASP.NET Core .NET 8 Web API
+- Backend: ASP.NET Core .NET 10 Web API
 - Database: MongoDB
-- Uploads: local backend storage at `server/wwwroot/uploads`
+- Uploads: authenticated Cloudinary storage in production; local private storage for development
 - Admin auth: JWT
 - ID card download: `html2canvas` + `jsPDF`
 
@@ -62,20 +62,20 @@ Admin dashboard includes `Export Users`, which downloads an Excel-compatible CSV
 
 The export also excludes passwords and `passwordHash`.
 
-## Vercel Frontend Deployment
+## Free Hosting Deployment
 
-Vercel is for the React + Vite frontend only. The ASP.NET Core backend API must be hosted separately on Render, Railway, a VPS, AWS, Azure, or similar.
+The intended free-tier arrangement is Cloudflare Pages for React/Vite, Render Free Docker for the API, Atlas M0 for an isolated MongoDB database, and authenticated Cloudinary storage. Live Cloudinary privacy and isolated restore checks must pass before real identity documents are accepted. Render Free sleeps when idle and its local filesystem is ephemeral.
 
-Recommended Vercel settings:
+Cloudflare Pages settings:
 
 - Root directory: `client`
 - Build command: `npm run build`
 - Output directory: `dist`
 - Environment variable: `VITE_API_BASE_URL=https://BACKEND-LIVE-URL/api`
 
-`client/vercel.json` contains SPA rewrites for routes such as `/user-login`, `/forgot-password`, `/my-id-card`, and `/verify-member`.
+Set Render's health-check path to `/health/ready`; use the repository-root `Dockerfile` and private backend environment settings. Do not put backend credentials in `VITE_` variables.
 
-See the [staging link checklist](docs/staging-vercel-api-checklist.md) for the separate API, private upload storage, isolated database, and host-side checks.
+See the [private storage runbook](docs/private-cloud-storage-runbook.md) for the remaining live security and recovery gates. The older Vercel checklist is retained as historical reference.
 
 ## Specs
 

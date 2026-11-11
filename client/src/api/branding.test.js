@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { branding, createBranding, officeAddressText, organizationContactRows } from '../config/branding.js';
+import { branding, createBranding, officeAddressText, officeBearers, organizationContactRows } from '../config/branding.js';
 
 test('branding uses the exact supplied client logo and matching favicon', () => {
   const logo = readFileSync(new URL(`../../public${branding.logo}`, import.meta.url));
@@ -36,12 +36,22 @@ test('public branding configuration trims values without affecting member identi
 
 test('confirmed office details are shared defaults and remain configurable', () => {
   const defaults = createBranding();
-  assert.equal(defaults.officeAddress, '146 C1, VELAYUDHA NAGAR,\nT.PALUR MAIN ROAD,\nJAYANKONDAM,\nARIYALUR DISTRICT - 621802');
+  assert.equal(defaults.officeAddress, '146 C1, Velayudha Nagar, T. Palur Main Road\nJayankondam, Ariyalur District – 621802');
   assert.equal(defaults.phone, '7373605560');
-  assert.equal(defaults.email, 'rksankar73@gmail.com');
-  const configured = createBranding({ VITE_WTS_PHONE: ' 9000000000 ', VITE_WTS_EMAIL: ' test@example.com ' });
+  assert.equal(defaults.email, 'weldingthozhilargalsangam@gmail.com');
+  assert.equal(createBranding({ VITE_WTS_EMAIL: 'PERSONAL-EMAIL-TEST-ONLY' }).email,
+    'weldingthozhilargalsangam@gmail.com', 'unapproved email cannot replace the office email');
+  const configured = createBranding({ VITE_WTS_PHONE: ' 9000000000 ', VITE_WTS_EMAIL: ' test@example.com ', VITE_WTS_EMAIL_APPROVED: 'true' });
   assert.equal(configured.phone, '9000000000');
   assert.equal(configured.email, 'test@example.com');
+});
+
+test('approved officer names and designations remain paired with their signature slots', () => {
+  assert.deepEqual(officeBearers, [
+    { officer: 'president', name: 'A. முரளி', roleTamil: 'மாநில தலைவர்', roleEnglish: 'State President' },
+    { officer: 'secretary', name: 'K. சங்கர்', roleTamil: 'மாநில செயலாளர்', roleEnglish: 'State Secretary' },
+    { officer: 'treasurer', name: 'S. விக்னேஷ்', roleTamil: 'மாநில பொருளாளர்', roleEnglish: 'State Treasurer' }
+  ]);
 });
 
 test('President home address is absent from public branding even if supplied in the environment', () => {

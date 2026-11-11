@@ -31,6 +31,15 @@ export async function privateImage(path, ownerId, adminOnly, signal) {
   return response.blob();
 }
 
+export async function privateOfficerSignature(officer, ownerId, signal) {
+  if (!ownerId || !['president', 'secretary', 'treasurer'].includes(officer)) throw new Error('Signature unavailable');
+  const response = await fetch(`${API_BASE_URL}/users/${encodeURIComponent(ownerId)}/officer-signatures/${officer}`, {
+    headers: memberHeaders(ownerId), signal, cache: 'no-store'
+  });
+  if (!response.ok || response.headers.get('content-type')?.split(';')[0] !== 'image/png') throw new Error('Signature unavailable');
+  return response.blob();
+}
+
 export async function downloadPrivateDocument(path) {
   if (!/^\/uploads\/[^/\\?#:]+$/.test(path || '')) throw new Error('Document unavailable');
   const response = await fetch(fileUrl(path), { headers: memberHeaders(null, true), cache: 'no-store' });

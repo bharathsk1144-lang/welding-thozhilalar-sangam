@@ -42,7 +42,17 @@ builder.Services.Configure<SmsSettings>(options =>
 });
 
 builder.Services.AddSingleton<MongoContext>();
-builder.Services.AddSingleton<PrivateUploadStorage>();
+var uploadProvider = builder.Configuration["Uploads:Provider"] ?? "Local";
+if (uploadProvider.Equals("Cloudinary", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IPrivateUploadIndex, MongoPrivateUploadIndex>();
+    builder.Services.AddHttpClient<IPrivateUploadStorage, CloudinaryPrivateUploadStorage>();
+}
+else if (uploadProvider.Equals("Local", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IPrivateUploadStorage, LocalPrivateUploadStorage>();
+}
+else throw new InvalidOperationException("Uploads:Provider must be Local or Cloudinary.");
 builder.Services.AddHttpClient<ISmsSender, ConfiguredSmsSender>();
 builder.Services.AddSingleton<OtpService>();
 builder.Services.AddSingleton(TimeProvider.System);
@@ -51,7 +61,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.ForwardLimit = 1;
-    options.KnownNetworks.Clear();
+    options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
     foreach (var value in trustedProxies)
     {
@@ -184,8 +194,6 @@ if (mobileModes.Length != 0)
     return;
 }
 
-var uploadRoot = app.Services.GetRequiredService<PrivateUploadStorage>().RootPath;
-Directory.CreateDirectory(uploadRoot);
 
 using (var scope = app.Services.CreateScope())
 {

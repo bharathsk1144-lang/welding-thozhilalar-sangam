@@ -42,7 +42,7 @@ export default function AppShell({ children, admin = false }) {
       <footer className="site-footer">
         <div className="footer-identity"><img src={branding.logo} alt="" width="70" height="70" /><div><strong lang="ta">{branding.nameTamil}</strong><span>{branding.nameEnglish}</span><p lang="ta">வெல்டிங் தொழிலாளர்களின் ஒற்றுமைக்காக.</p></div></div>
         <div><h2 lang="ta">உறுப்பினர் சேவைகள்</h2><Link to="/register">புதிய உறுப்பினர் பதிவு</Link><Link to="/user-login">Login & ID card</Link><Link to="/forgot-password">Forgot password</Link></div>
-        <div><h2 lang="ta">சங்கத் தகவல்கள்</h2><a href="/#about">About the Sangam</a><a href="/#contact">Office & contact</a><Link to="/verify-member">Verify a member</Link><Link to="/admin/login">Administration</Link></div>
+        <div><h2 lang="ta">சங்கத் தகவல்கள்</h2><a href="/#about">About the Sangam</a><a href="/#contact">Office & contact</a>{branding.email && <a href={`mailto:${branding.email}`}>{branding.email}</a>}<Link to="/verify-member">Verify a member</Link><Link to="/admin/login">Administration</Link></div>
         <div className="footer-bottom"><span>Welding Thozhilalar Sangam · Private union membership portal</span><span lang="ta">ஒற்றுமையே நம் வலிமை.</span></div>
       </footer>
     </div>
