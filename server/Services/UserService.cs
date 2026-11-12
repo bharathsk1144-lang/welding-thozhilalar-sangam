@@ -35,7 +35,7 @@ public sealed class UserService
         user.VerifiedBy = string.Empty;
         user.ApprovedAt = null;
         user.ConsentAcceptedAt = user.ConsentAccepted ? DateTime.UtcNow : user.ConsentAcceptedAt;
-        user.ConsentPolicyVersion = user.ConsentAccepted ? "2026-11-12" : null;
+        user.ConsentPolicyVersion = user.ConsentAccepted ? "2026-11-13" : null;
         user.CardExpiresAt = CardValidity.Expiry(user.CreatedAt);
         user.IdSchemeVersion = 2;
         for (var attempt = 0; attempt < 20; attempt++)

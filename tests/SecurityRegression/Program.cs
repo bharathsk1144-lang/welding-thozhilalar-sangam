@@ -288,7 +288,7 @@ try
     Check(newAccount.MobileVerified == true, "OTP registration stores verified mobile ownership");
     Check(System.Text.RegularExpressions.Regex.IsMatch(newAccount.MemberId, @"^WTS-CHN-[0-9]{4,}$") && newAccount.IdSchemeVersion == 2,
         "new registration stores a district-scoped, immutable server ID");
-    Check(newAccount.ConsentAcceptedAt.HasValue && newAccount.ConsentPolicyVersion == "2026-11-12" && !newAccount.ApprovedAt.HasValue,
+    Check(newAccount.ConsentAcceptedAt.HasValue && newAccount.ConsentPolicyVersion == "2026-11-13" && !newAccount.ApprovedAt.HasValue,
         "new registration records policy version and timestamp without automatic approval");
     var displayId = registered["displayMemberId"]!.GetValue<string>();
     Check(displayId == newAccount.MemberId, "new district member ID is displayed without an official-number alias");

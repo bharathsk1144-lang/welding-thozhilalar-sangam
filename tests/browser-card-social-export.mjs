@@ -314,6 +314,7 @@ try {
         const box = document.querySelector('input[name="consentAccepted"]');
         const headings = [...document.querySelectorAll('.registration-form .tamil-document h3')];
         return box && !box.checked && headings.length === 10 &&
+          document.querySelector('.registration-form .tamil-document').textContent.includes('மூன்று ஆண்டுகளுக்கு ஒருமுறை அடையாள அட்டை புதுப்பித்து') &&
           document.querySelector('.registration-form .tamil-document').textContent.includes('நமது சங்கத்தின் முக்கியக் கொள்கை');
       })()`), 'all ten registration rules and pledge are visible before unchecked consent');
       console.log('PASS registration: identity continues to details without OTP or a write request');
@@ -322,6 +323,7 @@ try {
       assert.ok(await evaluate(`(() => {
         const body = document.querySelector('.tamil-document__body');
         return [...body.querySelectorAll('h3')].filter(h => h.textContent.startsWith('விதி ')).length === 30 &&
+          body.textContent.includes('மூன்று ஆண்டுகளுக்கு ஒருமுறை உறுப்பினர் அடையாள அட்டை புதுப்பித்து') &&
           document.querySelector('#recommendations + ol')?.querySelectorAll('li').length === 5 &&
           body.textContent.includes('சங்கத்தின் இறுதி உறுதிமொழி');
       })()`), 'all About rules, recommendations and pledge render');
