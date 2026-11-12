@@ -291,9 +291,9 @@ public sealed class UsersController : ControllerBase
         if (await _userService.GetIdCardUserAsync(id) is null) return NotFound();
         var filename = officer switch
         {
-            "president" => "state-president-signature.png",
-            "secretary" => "state-secretary-signature.png",
-            "treasurer" => "state-treasurer-signature.png",
+            "president" => "state-president-signature-blue.png",
+            "secretary" => "state-secretary-signature-blue.png",
+            "treasurer" => "state-treasurer-signature-blue.png",
             _ => null
         };
         if (filename is null) return NotFound();
@@ -324,15 +324,15 @@ public sealed class UsersController : ControllerBase
             return NotFound(new { message = "No active member found for this Member ID." });
         }
 
-        var issueDate = user.CreatedAt == default ? DateTime.UtcNow : user.CreatedAt;
+        var issueDate = user.CreatedAt;
         return Ok(await _userService.PresentAsync(new MemberVerificationDto(
             user.Name,
             user.MemberId,
             user.District,
             GetMemberStatus(user),
             GetVerificationStatus(user),
-            $"{issueDate:yyyy}-{issueDate.AddYears(1):yyyy}",
-            "Verified Welding Thozhilalar Sangam member.")));
+            $"{(user.CardExpiresAt ?? CardValidity.Expiry(issueDate)):dd MMM yyyy}",
+            user.ApprovedAt.HasValue ? "Verified Welding Thozhilalar Sangam member." : "Membership approval pending.")));
     }
 
     [Authorize]
@@ -356,7 +356,7 @@ public sealed class UsersController : ControllerBase
 
         if (!request.ConsentAccepted)
         {
-            return "Consent is required before submitting registration.";
+            return "மேலே உள்ள சங்கத்தின் விதிமுறைகளைப் படித்து ஒப்புக்கொள்ளவும்.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Name) ||
@@ -510,7 +510,7 @@ public sealed class UsersController : ControllerBase
 
     private static IdCardDto ToIdCardDto(UserRegistration user)
     {
-        var issueDate = user.CreatedAt == default ? DateTime.UtcNow : user.CreatedAt;
+        var issueDate = user.CreatedAt;
         return new IdCardDto(
             user.Id ?? string.Empty,
             user.Name,
@@ -522,12 +522,14 @@ public sealed class UsersController : ControllerBase
             user.PermanentAddress,
             user.MemberId,
             issueDate,
-            $"{issueDate:yyyy}-{issueDate.AddYears(1):yyyy}",
+            $"{(user.CardExpiresAt ?? CardValidity.Expiry(issueDate)):dd MMM yyyy}",
             GetMemberStatus(user),
             GetVerificationStatus(user),
             user.VerifiedAt,
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
-            user.ProfilePhotoPath);
+            user.ProfilePhotoPath,
+            user.CardExpiresAt ?? CardValidity.Expiry(issueDate),
+            user.ApprovedAt.HasValue);
     }
 
     private static string GetMemberStatus(UserRegistration user)
@@ -537,7 +539,7 @@ public sealed class UsersController : ControllerBase
 
     private static string GetVerificationStatus(UserRegistration user)
     {
-        return string.IsNullOrWhiteSpace(user.VerificationStatus) ? "Verified" : user.VerificationStatus;
+        return user.ApprovedAt.HasValue ? "Verified" : "Pending";
     }
 
     private sealed record LoginAttempt(int Count, DateTime? LockedUntil);

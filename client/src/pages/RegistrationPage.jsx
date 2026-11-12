@@ -2,6 +2,8 @@ import { branding } from '../config/branding.js';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell.jsx';
+import TamilDocument from '../components/TamilDocument.jsx';
+import registrationTerms from '../content/registration-terms-tamil.md?raw';
 import { api } from '../api/client.js';
 import { normalizeMobile, MOBILE_PATTERN } from '../api/mobile.js';
 
@@ -168,7 +170,7 @@ export default function RegistrationPage() {
     }
 
     if (!form.consentAccepted) {
-      setError('Please accept the consent confirmation before submitting registration.');
+      setError('மேலே உள்ள சங்கத்தின் விதிமுறைகளைப் படித்து ஒப்புக்கொள்ளவும்.');
       return;
     }
 
@@ -477,6 +479,7 @@ export default function RegistrationPage() {
               </div>
 
               <div className="form-section consent-box">
+                <TamilDocument source={registrationTerms} />
                 <label className="check-row">
                   <input
                     required
@@ -486,7 +489,7 @@ export default function RegistrationPage() {
                     onChange={updateForm}
                   />
                   <span>
-                    I confirm that the provided details and documents are correct and I agree to allow Welding Thozhilalar Sangam to use them for membership verification.
+                    மேலே உள்ள சங்கத்தின் விதிமுறைகளைப் படித்து புரிந்துகொண்டு ஒப்புக்கொள்கிறேன். அளித்த விவரங்களும் ஆவணங்களும் சரியானவை என்பதை உறுதிப்படுத்துகிறேன்.
                   </span>
                 </label>
               </div>
@@ -497,7 +500,7 @@ export default function RegistrationPage() {
                   if (!form.hasJoinedWhatsAppGroup) {
                     setError('Kindly join the WhatsApp group before submitting.');
                   } else if (!form.consentAccepted) {
-                    setError('Please accept the consent confirmation before submitting registration.');
+                    setError('மேலே உள்ள சங்கத்தின் விதிமுறைகளைப் படித்து ஒப்புக்கொள்ளவும்.');
                   }
                 }}
               >

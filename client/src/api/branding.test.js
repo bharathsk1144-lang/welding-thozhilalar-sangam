@@ -37,13 +37,15 @@ test('public branding configuration trims values without affecting member identi
 test('confirmed office details are shared defaults and remain configurable', () => {
   const defaults = createBranding();
   assert.equal(defaults.officeAddress, '146 C1, Velayudha Nagar, T. Palur Main Road\nJayankondam, Ariyalur District – 621802');
-  assert.equal(defaults.phone, '7373605560');
+  assert.equal(defaults.phone, '8940456060');
+  assert.equal(defaults.phoneSecondary, '6374509830');
   assert.equal(defaults.email, 'weldingthozhilargalsangam@gmail.com');
   assert.equal(createBranding({ VITE_WTS_EMAIL: 'PERSONAL-EMAIL-TEST-ONLY' }).email,
     'weldingthozhilargalsangam@gmail.com', 'unapproved email cannot replace the office email');
   const configured = createBranding({ VITE_WTS_PHONE: ' 9000000000 ', VITE_WTS_EMAIL: ' test@example.com ', VITE_WTS_EMAIL_APPROVED: 'true' });
-  assert.equal(configured.phone, '9000000000');
-  assert.equal(configured.email, 'test@example.com');
+  assert.equal(configured.phone, '8940456060');
+  assert.equal(configured.phoneSecondary, '6374509830');
+  assert.equal(configured.email, 'weldingthozhilargalsangam@gmail.com');
 });
 
 test('approved officer names and designations remain paired with their signature slots', () => {

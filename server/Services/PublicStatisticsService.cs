@@ -22,7 +22,6 @@ public sealed class PublicStatisticsService(MongoContext context, IOptions<Publi
         if (!settings.ClassificationReviewed) throw new InvalidOperationException("Public statistics require reviewed test-account classification.");
         var filter = Builders<UserRegistration>.Filter;
         var eligible = filter.Eq(u => u.Status, "Active Member") &
-            filter.Eq(u => u.VerificationStatus, "Verified") &
             filter.Regex(u => u.MemberId, new BsonRegularExpression(@"\S")) &
             filter.Regex(u => u.CanonicalMobile, new BsonRegularExpression("^[6-9][0-9]{9}$"));
         // Explicit operator-classified test IDs are excluded; no identity heuristics.

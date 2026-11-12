@@ -96,12 +96,23 @@ public sealed class AdminController : ControllerBase
             user.MemberId,
             UserService.GetIdCardStatus(user),
             string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status,
-            string.IsNullOrWhiteSpace(user.VerificationStatus) ? "Verified" : user.VerificationStatus,
+            user.ApprovedAt.HasValue ? "Verified" : "Pending",
             user.VerifiedAt,
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
             user.ConsentAccepted,
             user.ConsentAcceptedAt)));
     }
+
+    [Authorize]
+    [HttpPut("users/{id}/approval")]
+    public async Task<IActionResult> SetApproval(string id, [FromBody] ApprovalRequest request)
+    {
+        var actor = User.Identity?.Name ?? "Admin";
+        var user = await _userService.SetApprovalAsync(id, request.Approved, actor);
+        return user is null ? NotFound() : Ok(new { approved = user.ApprovedAt.HasValue, approvedAt = user.ApprovedAt });
+    }
+
+    public sealed record ApprovalRequest(bool Approved);
 
     [Authorize]
     [HttpGet("users/export")]
@@ -130,7 +141,7 @@ public sealed class AdminController : ControllerBase
                 Csv(user.Pincode),
                 Csv(user.CreatedAt == default ? string.Empty : user.CreatedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
                 Csv(string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status),
-                Csv(string.IsNullOrWhiteSpace(user.VerificationStatus) ? "Verified" : user.VerificationStatus),
+                Csv(user.ApprovedAt.HasValue ? "Verified" : "Pending"),
                 Csv(item.DisplayMemberId),
                 Csv(item.MemberIdDisplayWarning ?? string.Empty)
             }));

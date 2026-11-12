@@ -34,10 +34,14 @@ public sealed class UserRegistration
     public DateTime? PaymentVerifiedAt { get; set; }
     public string PaymentVerifiedBy { get; set; } = string.Empty;
     public string MemberId { get; set; } = string.Empty;
+    public int? IdSchemeVersion { get; set; }
+    public DateTime? CardExpiresAt { get; set; }
     public string Status { get; set; } = "Active Member";
-    public string VerificationStatus { get; set; } = "Verified";
+    public string VerificationStatus { get; set; } = "Pending";
+    public DateTime? ApprovedAt { get; set; }
     public DateTime? VerifiedAt { get; set; }
     public string VerifiedBy { get; set; } = string.Empty;
     public bool ConsentAccepted { get; set; }
     public DateTime? ConsentAcceptedAt { get; set; }
+    public string? ConsentPolicyVersion { get; set; }
 }

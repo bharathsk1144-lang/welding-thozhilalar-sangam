@@ -12,7 +12,7 @@ const runRoot = path.join(root, 'artifacts', `card-social-export-${Date.now()}`)
 await mkdir(runRoot, { recursive: true });
 const card = { id: '000000000000000000000001', name: 'Synthetic Export Member', memberId: 'WTS-2026-000001',
   displayMemberId: 'WTS-TEST-REG-000001', district: 'Chennai', phoneNumber: '9876543200', dateOfBirth: '1990-01-01',
-  fatherName: 'Synthetic Father', bloodGroup: 'O+', issueDate: '2026-10-21', validityYear: '2027',
+  fatherName: 'Synthetic Father', bloodGroup: 'O+', issueDate: '2026-10-21', expiresAt: '2029-10-21', isApproved: false,
   permanentAddress: 'Synthetic house address, Test Street, Chennai 600001', status: 'Active Member', verificationStatus: 'Verified' };
 let unexpectedRequests = 0;
 let registrationOtpEnabled = false;
@@ -30,7 +30,7 @@ const mock = createServer((request, response) => {
   if (request.method === 'GET' && signature) {
     response.setHeader('Content-Type', 'image/png');
     response.setHeader('Cache-Control', 'private, no-store');
-    response.end(readFileSync(path.join(root, 'server', 'Assets', 'OfficerSignatures', `state-${signature[1]}-signature.png`)));
+    response.end(readFileSync(path.join(root, 'server', 'Assets', 'OfficerSignatures', `state-${signature[1]}-signature-blue.png`)));
     return;
   }
   if (request.method !== 'GET' || request.url !== `/api/users/${card.id}/id-card`) {
@@ -134,6 +134,7 @@ try {
     { mode: 'unapproved-address', office: 'OFFICE-ADDRESS-TEST-ONLY', president: 'PRESIDENT-NOT-APPROVED-TEST-ONLY', approved: false }
   ]) {
     const { mode } = scenario;
+    card.isApproved = scenario.approved;
     registrationOtpEnabled = mode !== 'missing-addresses';
     const output = path.join(runRoot, mode); await mkdir(output);
     const instagram = '@welding_thozhilalargal_sangam';
@@ -213,17 +214,27 @@ try {
     assert.ok(await evaluate("!/(Instagram|Facebook|YouTube|Website):/.test(document.querySelector('.pass-organization-contact').textContent)"));
     assert.equal(await evaluate("document.querySelectorAll('.pass-organization-contact a').length"), 0, 'no invented social profile links');
     assert.equal(await evaluate("document.querySelector('.pass-address dd').textContent"), card.permanentAddress);
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.member-pass--front .pass-office p > span')].map(node => node.textContent)"), scenario.office ? scenario.office.split('\n') : [
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.member-pass--front .pass-office p > span')].map(node => node.textContent)"), [
       '146 C1, Velayudha Nagar, T. Palur Main Road', 'Jayankondam, Ariyalur District – 621802'
     ]);
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-office > span')].map(node => node.textContent)"),
-      ['7373605560', 'weldingthozhilargalsangam@gmail.com']);
+      ['8940456060 · 6374509830', 'weldingthozhilargalsangam@gmail.com']);
     assert.equal(await evaluate("document.querySelector('.site-footer a[href^=\"mailto:\"]')?.textContent"),
       'weldingthozhilargalsangam@gmail.com');
-    if (!scenario.office) assert.ok(await evaluate(`(() => {
+    assert.ok(await evaluate(`(() => {
       const lines = [...document.querySelectorAll('.member-pass--front .pass-office p > span')];
-      return lines.length === 2 && lines.every(line => line.getBoundingClientRect().height <= parseFloat(getComputedStyle(line).lineHeight) + 1 && line.scrollWidth <= line.clientWidth);
+      return lines.length === 2 && lines.every(line => getComputedStyle(line).fontWeight >= 700 && line.getBoundingClientRect().height <= parseFloat(getComputedStyle(line).lineHeight) + 1 && line.scrollWidth <= line.clientWidth);
     })()`), 'approved office address fits exactly two visual lines');
+    assert.equal(await evaluate("document.querySelector('.pass-front-fields .pass-field:nth-child(2) dt')?.textContent"), 'POSTING');
+    assert.equal(await evaluate("document.querySelectorAll('.pass-verified-badge').length"), scenario.approved ? 1 : 0);
+    if (scenario.approved) assert.ok(await evaluate(`(() => {
+      const badge = document.querySelector('.pass-verified-badge').getBoundingClientRect();
+      const photo = document.querySelector('.pass-portrait').getBoundingClientRect();
+      const name = document.querySelector('.pass-name').getBoundingClientRect();
+      const card = document.querySelector('.member-pass--front').getBoundingClientRect();
+      return badge.width <= 36 && badge.height <= 36 && badge.left >= photo.left && badge.top >= photo.top + photo.height / 2 &&
+        badge.right < card.right && badge.bottom < name.top;
+    })()`), 'VERIFIED sticker stays at photo bottom right without covering face, name or card edge');
     assert.ok(await until(() => evaluate("[...document.querySelectorAll('.pass-signatures img')].length === 3 && [...document.querySelectorAll('.pass-signatures img')].every(img => img.complete && img.naturalWidth > 0)"), 'three authenticated officer signature images'));
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-signatures > div')].map(node => [node.querySelector('strong').textContent, ...[...node.querySelectorAll('small')].map(x => x.textContent)])"), [
       ['A. முரளி', 'மாநில தலைவர்', 'State President'],
@@ -299,7 +310,24 @@ try {
       })()`);
       await until(() => evaluate("document.querySelector('.registration-form') !== null"), 'registration details without OTP');
       assert.ok(await evaluate("!document.querySelector('input[autocomplete=one-time-code]')"));
+      assert.ok(await evaluate(`(() => {
+        const box = document.querySelector('input[name="consentAccepted"]');
+        const headings = [...document.querySelectorAll('.registration-form .tamil-document h3')];
+        return box && !box.checked && headings.length === 10 &&
+          document.querySelector('.registration-form .tamil-document').textContent.includes('நமது சங்கத்தின் முக்கியக் கொள்கை');
+      })()`), 'all ten registration rules and pledge are visible before unchecked consent');
       console.log('PASS registration: identity continues to details without OTP or a write request');
+      await command('Page.navigate', { url: `${origin}/about` });
+      await until(() => evaluate("document.querySelectorAll('.tamil-document__body h1[id^=part-]').length === 8"), 'full About page');
+      assert.ok(await evaluate(`(() => {
+        const body = document.querySelector('.tamil-document__body');
+        return [...body.querySelectorAll('h3')].filter(h => h.textContent.startsWith('விதி ')).length === 30 &&
+          document.querySelector('#recommendations + ol')?.querySelectorAll('li').length === 5 &&
+          body.textContent.includes('சங்கத்தின் இறுதி உறுதிமொழி');
+      })()`), 'all About rules, recommendations and pledge render');
+      await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 850, deviceScaleFactor: 1, mobile: true });
+      assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'), 'About page fits mobile viewport');
+      console.log('PASS About: 8 parts, 30 rules, 5 recommendations, pledge and mobile layout');
     }
     if (mode === 'approved-long-addresses') {
       await command('Page.navigate', { url: `${origin}/register` });

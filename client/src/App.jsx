@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import HomePage from './pages/HomePage.jsx';
+import AboutPage from './pages/AboutPage.jsx';
 import RegistrationPage from './pages/RegistrationPage.jsx';
 import AdminLoginPage from './pages/AdminLoginPage.jsx';
 import AdminDashboardPage from './pages/AdminDashboardPage.jsx';
@@ -15,6 +16,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route path="/about" element={<AboutPage />} />
       <Route path="/register" element={<RegistrationPage />} />
       <Route path="/user-login" element={<UserLoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
