@@ -26,22 +26,43 @@ public sealed class UserService
         if (await PhoneNumberExistsAsync(user.PhoneNumber)) throw new DuplicateMobileException();
         user.District = user.District.Trim();
         user.CreatedAt = DateTime.UtcNow;
-        user.MemberId = MemberIdFormat.Generate(user);
+        if (!DistrictMemberCode.TryGet(user.District, out var districtCode))
+            throw new ArgumentException("Unsupported district for member ID issuance.");
         user.PaymentStatus = string.IsNullOrWhiteSpace(user.PaymentStatus) ? "Not Required" : user.PaymentStatus;
         user.Status = string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status;
-        user.VerificationStatus = string.IsNullOrWhiteSpace(user.VerificationStatus) ? "Verified" : user.VerificationStatus;
-        user.VerifiedAt ??= DateTime.UtcNow;
-        user.VerifiedBy = string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy;
+        user.VerificationStatus = "Pending";
+        user.VerifiedAt = null;
+        user.VerifiedBy = string.Empty;
+        user.ApprovedAt = null;
         user.ConsentAcceptedAt = user.ConsentAccepted ? DateTime.UtcNow : user.ConsentAcceptedAt;
-        try
+        user.ConsentPolicyVersion = user.ConsentAccepted ? "2026-11-12" : null;
+        user.CardExpiresAt = CardValidity.Expiry(user.CreatedAt);
+        user.IdSchemeVersion = 2;
+        for (var attempt = 0; attempt < 20; attempt++)
         {
-            await _context.Users.InsertOneAsync(user);
+            try
+            {
+                var sequence = await _context.MemberSequences.FindOneAndUpdateAsync(
+                    s => s.DistrictCode == districtCode,
+                    Builders<MemberSequence>.Update.Inc(s => s.Value, 1),
+                    new FindOneAndUpdateOptions<MemberSequence> { IsUpsert = true, ReturnDocument = ReturnDocument.After });
+                user.MemberId = $"WTS-{districtCode}-{sequence.Value:D4}";
+                if (await _context.Users.Find(u => u.MemberId == user.MemberId).AnyAsync()) continue;
+                await _context.Users.InsertOneAsync(user);
+                return user;
+            }
+            catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
+            {
+                if (await PhoneNumberExistsAsync(user.PhoneNumber)) throw new DuplicateMobileException();
+                // An upsert race or an already-issued number consumes this sequence value; retry.
+            }
+            catch (MongoCommandException ex) when (ex.Code == 11000)
+            {
+                if (await PhoneNumberExistsAsync(user.PhoneNumber)) throw new DuplicateMobileException();
+                // Concurrent first upserts can race on the sequence document's _id.
+            }
         }
-        catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
-        {
-            throw new DuplicateMobileException();
-        }
-        return user;
+        throw new InvalidOperationException("Unable to issue a unique member ID. Retry registration.");
     }
 
     public async Task<IReadOnlyList<UserListItemDto>> GetUsersAsync(string? district)
@@ -101,7 +122,8 @@ public sealed class UserService
         var number = _membership.OrganizationRegistrationNumber;
         foreach (var view in views) { view.DisplayMemberId = view.MemberId; view.MemberIdDisplayWarning = null; }
         if (string.IsNullOrWhiteSpace(number)) return views;
-        var suffixes = views.Select(v => MemberIdFormat.TryGetSuffix(v.MemberId, out var suffix) ? suffix : null)
+        var suffixes = views.Where(v => !DistrictMemberCode.All.Values.Any(code => v.MemberId.StartsWith($"WTS-{code}-", StringComparison.Ordinal)))
+            .Select(v => MemberIdFormat.TryGetSuffix(v.MemberId, out var suffix) ? suffix : null)
             .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         if (suffixes.Length > 0)
@@ -116,6 +138,7 @@ public sealed class UserService
         foreach (var view in views)
         {
             if (string.IsNullOrWhiteSpace(view.MemberId)) continue;
+            if (DistrictMemberCode.All.Values.Any(code => view.MemberId.StartsWith($"WTS-{code}-", StringComparison.Ordinal))) continue;
             if (!MemberIdFormat.TryGetSuffix(view.MemberId, out var suffix))
                 view.MemberIdDisplayWarning = "Stored Member ID needs review before an official display ID can be derived.";
             else if (counts.GetValueOrDefault(suffix) != 1)
@@ -222,6 +245,21 @@ public sealed class UserService
     public async Task<UserRegistration?> GetIdCardUserAsync(string userId)
     {
         return await GetByIdAsync(userId);
+    }
+
+    public async Task<UserRegistration?> SetApprovalAsync(string userId, bool approved, string actor)
+    {
+        var update = approved
+            ? Builders<UserRegistration>.Update.Set(u => u.ApprovedAt, DateTime.UtcNow)
+                .Set(u => u.VerificationStatus, "Verified")
+                .Set(u => u.VerifiedAt, DateTime.UtcNow)
+                .Set(u => u.VerifiedBy, actor)
+            : Builders<UserRegistration>.Update.Unset(u => u.ApprovedAt)
+                .Set(u => u.VerificationStatus, "Pending")
+                .Unset(u => u.VerifiedAt)
+                .Set(u => u.VerifiedBy, string.Empty);
+        var result = await _context.Users.UpdateOneAsync(u => u.Id == userId, update);
+        return result.MatchedCount == 0 ? null : await GetByIdAsync(userId);
     }
 
     public async Task<bool> PhoneNumberExistsAsync(string phoneNumber)

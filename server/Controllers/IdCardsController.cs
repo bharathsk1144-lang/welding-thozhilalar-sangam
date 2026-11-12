@@ -28,7 +28,8 @@ public sealed class IdCardsController : ControllerBase
             return NotFound(new { message = "User not found." });
         }
 
-        var issueDate = user.CreatedAt == default ? DateTime.UtcNow : user.CreatedAt;
+        var issueDate = user.CreatedAt;
+        var expiresAt = user.CardExpiresAt ?? CardValidity.Expiry(issueDate);
         return Ok(await _userService.PresentAsync(new IdCardDto(
             user.Id ?? string.Empty,
             user.Name,
@@ -40,11 +41,13 @@ public sealed class IdCardsController : ControllerBase
             user.PermanentAddress,
             user.MemberId,
             issueDate,
-            $"{issueDate:yyyy}-{issueDate.AddYears(1):yyyy}",
+            $"{expiresAt:dd MMM yyyy}",
             string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status,
-            string.IsNullOrWhiteSpace(user.VerificationStatus) ? "Verified" : user.VerificationStatus,
+            user.ApprovedAt.HasValue ? "Verified" : "Pending",
             user.VerifiedAt,
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
-            user.ProfilePhotoPath)));
+            user.ProfilePhotoPath,
+            expiresAt,
+            user.ApprovedAt.HasValue)));
     }
 }

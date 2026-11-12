@@ -37,6 +37,9 @@ public sealed class DistrictsController : ControllerBase
             return BadRequest(new { message = "District name is required." });
         }
 
+        if (!DistrictMemberCode.TryGet(request.Name, out _))
+            return BadRequest(new { message = "No member ID code is configured for this district." });
+
         if (string.IsNullOrWhiteSpace(request.WhatsAppGroupLink))
         {
             return BadRequest(new { message = "WhatsApp group link is required." });
@@ -64,6 +67,9 @@ public sealed class DistrictsController : ControllerBase
         {
             return BadRequest(new { message = "District name is required." });
         }
+
+        if (!DistrictMemberCode.TryGet(request.Name, out _))
+            return BadRequest(new { message = "No member ID code is configured for this district." });
 
         if (string.IsNullOrWhiteSpace(request.WhatsAppGroupLink))
         {

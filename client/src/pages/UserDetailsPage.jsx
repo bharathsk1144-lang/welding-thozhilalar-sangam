@@ -40,6 +40,16 @@ export default function UserDetailsPage() {
     }
   }
 
+  async function setApproval(approved) {
+    setError('');
+    try {
+      await api.setMemberApproval(id, approved);
+      const [updatedUser, updatedCard] = await Promise.all([api.adminUserDetails(id), api.idCard(id)]);
+      setUser(updatedUser);
+      setCard(updatedCard);
+    } catch (err) { setError(err.message || 'Unable to update member approval.'); }
+  }
+
   return (
     <AppShell admin>
       <section className="details-wrap">
@@ -67,7 +77,8 @@ export default function UserDetailsPage() {
               <Detail label="Pincode / அஞ்சல் குறியீடு" value={user.pincode} />
               <Detail label="ID Card Status" value={user.idCardStatus} />
               <Detail label="Status" value={user.status || 'Active Member'} />
-              <Detail label="Verification Status" value={user.verificationStatus || 'Verified'} />
+              <Detail label="Verification Status" value={user.verificationStatus || 'Pending'} />
+              <Detail label="Approved for VERIFIED badge" value={card?.isApproved ? 'Yes' : 'No'} />
               <Detail label="Consent Accepted" value={user.consentAccepted ? 'Yes' : 'No'} />
               <Detail label="Member ID" value={memberIdDisplay(user) || 'Awaiting assignment'} />
               {memberIdDisplay(user) !== user.memberId && <Detail label="Original printed Member ID" value={user.memberId} />}
@@ -76,6 +87,7 @@ export default function UserDetailsPage() {
 
             {user.memberIdDisplayWarning && <div className="notice error" role="status">{user.memberIdDisplayWarning}</div>}
             <div className="detail-actions">
+              <button className="secondary" type="button" onClick={() => setApproval(!card?.isApproved)}>{card?.isApproved ? 'Revoke approval' : 'Approve member'}</button>
               <Link to={`/id-card/${user.id}`} className="button-link primary">View ID Card</Link>
               <button className="secondary" disabled={!card || downloading} onClick={handleDownload}>
                 {downloading ? 'Preparing Download...' : 'Download ID Card'}

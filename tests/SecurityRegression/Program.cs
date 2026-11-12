@@ -33,6 +33,8 @@ foreach (var officer in new[] { "president", "secretary", "treasurer" })
 {
     var filename = $"state-{officer}-signature.png";
     File.Copy(Path.Combine(signatureSource, filename), Path.Combine(signatureTarget, filename));
+    var blue = $"state-{officer}-signature-blue.png";
+    File.Copy(Path.Combine(signatureSource, blue), Path.Combine(signatureTarget, blue));
 }
 var namedArgument = args.SingleOrDefault(a => a.StartsWith("--isolated-database=", StringComparison.Ordinal));
 var namedDatabase = namedArgument?["--isolated-database=".Length..];
@@ -66,7 +68,7 @@ void Check(bool condition, string name)
 UserRegistration Seed(string phone, string member, string password = "Original@123")
 {
     var user = new UserRegistration { Id = ObjectId.GenerateNewId().ToString(), PhoneNumber = phone,
-        Name = "Existing isolated member", MemberId = member, District = "Chennai",
+        Name = "Existing isolated member", MemberId = member, District = "Chennai", VerificationStatus = "Verified",
         AadhaarPhotoPath = "/uploads/legacy-aadhaar.png", ProfilePhotoPath = "/uploads/legacy-profile.png" };
     if (password != "") user.PasswordHash = new PasswordHasher<UserRegistration>().HashPassword(user, password);
     return user;
@@ -240,13 +242,13 @@ try
     }
     async Task<JsonObject> Post(string route, object body, HttpStatusCode expected, string name) =>
         await Json(await http.PostAsJsonAsync(route, body), expected, name);
-    MultipartFormDataContent Registration(string phone, string token = "", string name = "New member", string password = "NewMember@123")
+    MultipartFormDataContent Registration(string phone, string token = "", string name = "New member", string password = "NewMember@123", bool consent = true)
     {
         var form = new MultipartFormDataContent();
         foreach (var field in new Dictionary<string, string> { ["phoneNumber"] = phone, ["verificationToken"] = token,
             ["name"] = name, ["password"] = password, ["location"] = "Test", ["dateOfBirth"] = "1990-01-01",
             ["bloodGroup"] = "O+", ["fatherName"] = "Test father", ["permanentAddress"] = "Isolated test address",
-            ["pincode"] = "600001", ["district"] = "Chennai", ["hasJoinedWhatsAppGroup"] = "true", ["consentAccepted"] = "true" })
+            ["pincode"] = "600001", ["district"] = "Chennai", ["hasJoinedWhatsAppGroup"] = "true", ["consentAccepted"] = consent ? "true" : "false" })
             form.Add(new StringContent(field.Value), field.Key);
         foreach (var field in new[] { "aadhaarPhoto", "profilePhoto" })
         {
@@ -279,16 +281,17 @@ try
     var newId = registered["userId"]!.GetValue<string>();
     var afterRegistrationStatistics = await Json(await http.GetAsync("/api/statistics"), HttpStatusCode.OK, "statistics refreshed after registration");
     Check(afterRegistrationStatistics["totalRegisteredMembers"]!.GetValue<long>() == beforeRegistrationStatistics.TotalRegisteredMembers + 1,
-        "successful registration increases database-driven public count immediately");
+        "pending registration still counts as a registered member without claiming verification");
     var memberToken = registered["token"]!.GetValue<string>();
     var registeredBefore = (await users.Find(u => u.Id == newId).SingleAsync()).ToJson();
     var newAccount = await users.Find(u => u.Id == newId).SingleAsync();
     Check(newAccount.MobileVerified == true, "OTP registration stores verified mobile ownership");
-    Check(newAccount.MemberId.StartsWith($"WTS-{DateTime.UtcNow.Year}-", StringComparison.Ordinal) &&
-        newAccount.MemberId[^6..].All(c => char.IsAsciiHexDigit(c) && !char.IsLower(c)),
-        "new registration retains a year-based stored identity even with an official display prefix");
+    Check(System.Text.RegularExpressions.Regex.IsMatch(newAccount.MemberId, @"^WTS-CHN-[0-9]{4,}$") && newAccount.IdSchemeVersion == 2,
+        "new registration stores a district-scoped, immutable server ID");
+    Check(newAccount.ConsentAcceptedAt.HasValue && newAccount.ConsentPolicyVersion == "2026-11-12" && !newAccount.ApprovedAt.HasValue,
+        "new registration records policy version and timestamp without automatic approval");
     var displayId = registered["displayMemberId"]!.GetValue<string>();
-    Check(displayId == MemberIdFormat.Display(newAccount.MemberId, officialIds ? "TEST-REG/2026" : ""), "registration exposes the server display projection separately");
+    Check(displayId == newAccount.MemberId, "new district member ID is displayed without an official-number alias");
     var publicVerification = await Json(await http.GetAsync($"/api/users/verify/{Uri.EscapeDataString(displayId)}"), HttpStatusCode.OK,
         "new ID public verification supports encoded official separators");
     Check(publicVerification["memberId"]!.GetValue<string>() == newAccount.MemberId && !publicVerification.ContainsKey("phoneNumber"),
@@ -347,13 +350,34 @@ try
         var signed = await GetWithToken(route, memberToken);
         Check(signed.StatusCode == HttpStatusCode.OK && signed.Headers.CacheControl?.NoStore == true &&
             (await signed.Content.ReadAsByteArrayAsync()).SequenceEqual(
-                File.ReadAllBytes(Path.Combine(signatureSource, $"state-{officer}-signature.png"))),
+                File.ReadAllBytes(Path.Combine(signatureSource, $"state-{officer}-signature-blue.png"))),
             $"owner {officer} signature is exact and no-store");
         Check((await GetWithToken(route, adminToken)).StatusCode == HttpStatusCode.OK,
             $"admin {officer} signature access");
         Check((await GetWithToken($"/Assets/OfficerSignatures/state-{officer}-signature.png", null)).StatusCode == HttpStatusCode.NotFound,
             $"raw {officer} signature is not a static asset");
+        Check((await GetWithToken($"/Assets/OfficerSignatures/state-{officer}-signature-blue.png", null)).StatusCode == HttpStatusCode.NotFound,
+            $"blue {officer} signature is not a static asset");
     }
+    var pendingCard = await Json(await GetWithToken($"/api/users/{newId}/id-card", memberToken), HttpStatusCode.OK, "pending card preview");
+    Check(pendingCard["isApproved"]!.GetValue<bool>() == false && pendingCard["verificationStatus"]!.GetValue<string>() == "Pending",
+        "registration cannot display VERIFIED badge before admin approval");
+    Check((await http.PutAsJsonAsync($"/api/admin/users/{newId}/approval", new { approved = true })).StatusCode == HttpStatusCode.Unauthorized,
+        "anonymous approval is denied");
+    using (var approval = new HttpRequestMessage(HttpMethod.Put, $"/api/admin/users/{newId}/approval"))
+    {
+        approval.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        approval.Content = JsonContent.Create(new { approved = true });
+        await Json(await http.SendAsync(approval), HttpStatusCode.OK, "admin approves member");
+    }
+    var approvedCard = await Json(await GetWithToken($"/api/users/{newId}/id-card", memberToken), HttpStatusCode.OK, "approved card preview");
+    Check(approvedCard["isApproved"]!.GetValue<bool>() && approvedCard["verificationStatus"]!.GetValue<string>() == "Verified",
+        "admin approval alone enables VERIFIED badge");
+    Check((await statisticsService.GetAsync(default)).TotalRegisteredMembers == beforeRegistrationStatistics.TotalRegisteredMembers + 1,
+        "approved member enters verified public count");
+    Check(approvedCard["expiresAt"]!.GetValue<DateTime>() == CardValidity.Expiry(newAccount.CreatedAt),
+        "card expiry uses persisted registration date plus three calendar years");
+    var approvedSnapshot = (await users.Find(u => u.Id == newId).SingleAsync()).ToJson();
     if (officialIds)
     {
         var oldCard = await Json(await GetWithToken($"/api/idcards/{legacy.Id}", adminToken), HttpStatusCode.OK, "existing ID card alias on alternate route");
@@ -402,7 +426,7 @@ try
     var afterReset = await users.Find(u => u.Id == legacy.Id).SingleAsync();
     Check(afterReset.MemberId == legacy.MemberId && afterReset.PasswordHash != legacy.PasswordHash &&
         afterReset.AadhaarPhotoPath == legacy.AadhaarPhotoPath && afterReset.ProfilePhotoPath == legacy.ProfilePhotoPath &&
-        registeredBefore == (await users.Find(u => u.Id == newId).SingleAsync()).ToJson(), "TC10/11/17: reset preserves Member ID/documents and other account");
+        approvedSnapshot == (await users.Find(u => u.Id == newId).SingleAsync()).ToJson(), "TC10/11/17: reset preserves Member ID/documents and other account");
     await Post("/api/users/login", new { phone = "9876543210", password = "ResetSecure@123" }, HttpStatusCode.OK, "reset password authenticates");
 
     // Exercise the real limiter instead of disabling it for tests. Wait for the next window once.
@@ -508,6 +532,9 @@ try
             HttpStatusCode.Conflict, "legacy route cannot verify registration OTP while disabled");
         await Json(await disabledHttp.PostAsync("/api/users/register", Registration("9876543270", name: "")),
             HttpStatusCode.BadRequest, "disabled OTP still validates registration fields");
+        await Json(await disabledHttp.PostAsync("/api/users/register", Registration("9876543270", consent: false)),
+            HttpStatusCode.BadRequest, "direct API registration rejects missing policy acceptance");
+        Check(!await users.Find(u => u.CanonicalMobile == "9876543270").AnyAsync(), "missing consent writes no member");
         var unverifiedRegistration = await Json(await disabledHttp.PostAsync("/api/users/register", Registration("9876543270")),
             HttpStatusCode.OK, "registration without OTP");
         Check(unverifiedRegistration["mobileVerified"]!.GetValue<bool>() == false, "registration reports unverified mobile");
@@ -541,6 +568,27 @@ try
         Check(!await users.Find(u => u.CanonicalMobile == "9876543288").AnyAsync(),
             "failed upload creates no member record");
     }
+    var configuredDistricts = await context.Districts.Find(_ => true).Project(d => d.Name).ToListAsync();
+    Check(configuredDistricts.Count == 38 && configuredDistricts.All(name => DistrictMemberCode.TryGet(name, out _)) &&
+        DistrictMemberCode.All.Values.Distinct().Count() == DistrictMemberCode.All.Count &&
+        DistrictMemberCode.All["Ariyalur"] == "ALR" && DistrictMemberCode.All["Coimbatore"] == "CBE",
+        "all configured districts have unique stable ID codes");
+    Check(!DistrictMemberCode.TryGet("Unknown", out _), "unknown districts cannot receive guessed codes");
+    Check(CardValidity.Expiry(new DateTime(2026, 11, 12, 12, 0, 0, DateTimeKind.Utc)) == new DateTime(2029, 11, 12, 12, 0, 0, DateTimeKind.Utc) &&
+        CardValidity.Expiry(new DateTime(2024, 2, 29, 12, 0, 0, DateTimeKind.Utc)) == new DateTime(2027, 2, 28, 12, 0, 0, DateTimeKind.Utc),
+        "calendar-year expiry handles ordinary and leap-day dates");
+    var historicalDistrictId = Seed("9888888899", "WTS-ALR-0001");
+    historicalDistrictId.CanonicalMobile = historicalDistrictId.PhoneNumber;
+    historicalDistrictId.District = "Ariyalur";
+    await users.InsertOneAsync(historicalDistrictId);
+    var issuer = new UserService(context);
+    var simultaneous = await Task.WhenAll(Enumerable.Range(0, 8).Select(i => issuer.CreateAsync(new UserRegistration {
+        PhoneNumber = $"98888888{i:D2}", District = "Ariyalur", Name = "Synthetic concurrent member", ConsentAccepted = true })));
+    Check(simultaneous.Select(u => u.MemberId).Distinct().Count() == 8 &&
+        simultaneous.All(u => u.MemberId.StartsWith("WTS-ALR-", StringComparison.Ordinal)) &&
+        simultaneous.Select(u => u.MemberId).Order().SequenceEqual(Enumerable.Range(2, 8).Select(i => $"WTS-ALR-{i:D4}")) &&
+        (await users.Find(u => u.Id == historicalDistrictId.Id).SingleAsync()).MemberId == "WTS-ALR-0001",
+        "eight parallel registrations skip a historical ID and receive unique atomic Ariyalur numbers");
     Console.WriteLine($"ALL {passed} CHECKS PASSED. Isolated database: {dbName}");
 }
 catch (Exception ex)

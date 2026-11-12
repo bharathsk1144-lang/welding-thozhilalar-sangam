@@ -18,6 +18,7 @@ public sealed class RegisterUserRequest
     public string District { get; set; } = string.Empty;
     public bool HasJoinedWhatsAppGroup { get; set; }
     public bool ConsentAccepted { get; set; }
+    public string ConsentPolicyVersion { get; set; } = string.Empty;
     public IFormFile? AadhaarPhoto { get; set; }
     public IFormFile? ProfilePhoto { get; set; }
 }
@@ -157,7 +158,9 @@ public sealed record IdCardDto(
     string VerificationStatus,
     DateTime? VerifiedAt,
     string VerifiedBy,
-    string ProfilePhotoPath) : IMemberIdView
+    string ProfilePhotoPath,
+    DateTime? ExpiresAt = null,
+    bool IsApproved = false) : IMemberIdView
 {
     public string DisplayMemberId { get; set; } = MemberId;
     public string? MemberIdDisplayWarning { get; set; }

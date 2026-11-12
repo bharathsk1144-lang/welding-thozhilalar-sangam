@@ -15,11 +15,13 @@ public sealed class MongoContext
         Users = database.GetCollection<UserRegistration>("Users");
         Districts = database.GetCollection<District>("Districts");
         PrivateUploads = database.GetCollection<PrivateUploadRecord>("PrivateUploads");
+        MemberSequences = database.GetCollection<MemberSequence>("MemberSequences");
     }
 
     public IMongoCollection<UserRegistration> Users { get; }
     public IMongoCollection<District> Districts { get; }
     public IMongoCollection<PrivateUploadRecord> PrivateUploads { get; }
+    public IMongoCollection<MemberSequence> MemberSequences { get; }
 
     public async Task EnsureIndexesAsync()
     {
@@ -29,7 +31,7 @@ public sealed class MongoContext
 
         var memberIdIndex = new CreateIndexModel<UserRegistration>(
             Builders<UserRegistration>.IndexKeys.Ascending(user => user.MemberId),
-            new CreateIndexOptions { Name = "ix_users_member_id" });
+            new CreateIndexOptions<UserRegistration> { Unique = true, Name = "ux_users_new_member_id", PartialFilterExpression = Builders<UserRegistration>.Filter.Eq(u => u.IdSchemeVersion, 2) });
 
         await MobileIndexMigration.EnsureReadyAsync(Users);
         await Users.Indexes.CreateOneAsync(memberIdIndex);

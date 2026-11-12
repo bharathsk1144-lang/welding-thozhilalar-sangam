@@ -2,14 +2,14 @@ import { forwardRef } from 'react';
 import ProtectedImage from './ProtectedImage.jsx';
 import ProtectedOfficerSignature from './ProtectedOfficerSignature.jsx';
 import OrganizationContactIcon from './OrganizationContactIcon.jsx';
-import { branding, officeAddressText, officeBearers, organizationContactRows } from '../config/branding.js';
+import { branding, officeBearers, organizationContactRows } from '../config/branding.js';
 import { memberIdDisplay, memberIdFilePart } from '../api/memberId.js';
 
 const text = (value, missing = 'Not recorded') => String(value ?? '').trim() || missing;
 function date(value) {
   const parsed = value ? new Date(value) : null;
   return !parsed || Number.isNaN(parsed.getTime()) || parsed.getFullYear() < 1900 ? 'Not recorded'
-    : parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    : parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 }
 function Field({ label, value, className = '' }) {
   return <div className={`pass-field ${className}`}><dt>{label}</dt><dd>{text(value)}</dd></div>;
@@ -20,7 +20,7 @@ function CardBrand() {
       <img src={branding.logo} alt="Sangam crest" width="64" height="64" />
       <div className="pass-brand__names"><span>{branding.nameEnglish}</span><strong lang="ta">{branding.nameTamil}</strong></div>
     </div>
-    <section className="pass-office" aria-label="Organization office address"><p>{officeAddressText().split(/\r?\n/).map((line) => <span key={line}>{line}</span>)}</p>{branding.phone && <span>{branding.phone}</span>}{branding.email && <span>{branding.email}</span>}</section>
+    <section className="pass-office" aria-label="Organization office address"><p><span>146 C1, Velayudha Nagar, T. Palur Main Road</span><span>Jayankondam, Ariyalur District – 621802</span></p><span>{branding.phone} · {branding.phoneSecondary}</span><span>{branding.email}</span></section>
   </header>;
 }
 
@@ -33,10 +33,10 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
         <span className="pass-side-label">FRONT</span>
         <CardBrand />
         <div className="pass-membership" lang="ta">உறுப்பினர் அடையாள அட்டை</div>
-        <div className="pass-portrait"><ProtectedImage path={card.profilePhotoPath} ownerId={card.id} alt="Member passport size photo" /></div>
+        <div className="pass-portrait"><ProtectedImage path={card.profilePhotoPath} ownerId={card.id} alt="Member passport size photo" />{card.isApproved && <img className="pass-verified-badge" src="/images/verified-sticker.png" alt="Verified by the Sangam" />}</div>
         <dl className="pass-front-fields">
           <Field label="பெயர் / Name" value={card.name} className="pass-name" />
-          <Field label="வகை / Membership" value="Member / உறுப்பினர்" />
+          <Field label="POSTING" value="Member / உறுப்பினர்" />
           <Field label="மாவட்டம் / District" value={card.district} />
           <Field label="உறுப்பினர் எண் / Member ID" value={text(displayId, 'Awaiting assignment')} className="pass-id" />
         </dl>
@@ -60,7 +60,7 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
           <Field label="இரத்த வகை / Blood group" value={card.bloodGroup} />
           <Field label="தந்தை பெயர் / Father" value={card.fatherName} />
           <Field label="சேர்ந்த நாள் / Joined" value={date(card.issueDate)} />
-          <Field label="செல்லுபடிக் காலம் / Validity" value={card.validityYear} />
+          <Field label="காலாவதி தேதி / Expires" value={date(card.expiresAt)} />
           <Field label="வீட்டு முகவரி / House address" value={card.permanentAddress} className="pass-address" />
         </dl>
         {displayId !== card.memberId && card.memberId && <p className="pass-stored-id">Original printed ID: <strong>{card.memberId}</strong></p>}
