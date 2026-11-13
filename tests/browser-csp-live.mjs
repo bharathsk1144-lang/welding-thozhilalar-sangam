@@ -82,7 +82,7 @@ try {
         document.querySelector('.form-panel form').requestSubmit();
       })()`);
       await until(() => evaluate("document.querySelector('.registration-form .tamil-document') !== null"), 'registration rules');
-      assert.ok(await evaluate("document.querySelectorAll('select[name=district] option').length > 1"), 'district choices load');
+      await until(() => evaluate("document.querySelectorAll('select[name=district] option').length > 1"), 'district choices load');
       assert.equal(await evaluate("document.querySelectorAll('.consent-box .tamil-document h3').length"), 10, 'ten Tamil rules render');
       assert.equal(await evaluate("document.querySelector('input[name=consentAccepted]').checked"), false, 'consent starts unchecked');
     }
