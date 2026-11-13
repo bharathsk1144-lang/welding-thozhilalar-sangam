@@ -26,14 +26,15 @@ function CardBrand() {
 
 const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref) {
   const displayId = memberIdDisplay(card);
+  const approved = card.isApproved === true;
   return <div className="card-preview">
-    <div className="card-preview__heading"><p className="eyebrow">YOUR MEMBERSHIP · BOTH SIDES</p><h2 lang="ta">உறுப்பினர் அடையாள அட்டை</h2><p>Preview the front and back. Your PDF includes one side per page.</p></div>
+    <div className="card-preview__heading"><p className="eyebrow">YOUR MEMBERSHIP · BOTH SIDES</p><h2 lang="ta">உறுப்பினர் அடையாள அட்டை</h2><p>Preview the front and back. Your PDF includes one side per page.</p>{!approved && <p role="status">VERIFIED badge pending admin approval.</p>}</div>
     <div ref={ref} className="membership-card card-pair" aria-label="Membership ID card front and back">
       <article className="member-pass member-pass--front" data-card-side="front" aria-label="Front of membership card">
         <span className="pass-side-label">FRONT</span>
         <CardBrand />
         <div className="pass-membership" lang="ta">உறுப்பினர் அடையாள அட்டை</div>
-        <div className="pass-portrait"><ProtectedImage path={card.profilePhotoPath} ownerId={card.id} alt="Member passport size photo" />{card.isApproved && <img className="pass-verified-badge" src="/images/verified-sticker.png" alt="Verified by the Sangam" />}</div>
+        <div className="pass-portrait"><ProtectedImage path={card.profilePhotoPath} ownerId={card.id} alt="Member passport size photo" />{approved && <img className="pass-verified-badge" src="/images/verified-sticker.png" alt="Verified by the Sangam" width="34" height="34" loading="eager" decoding="sync" />}</div>
         <dl className="pass-front-fields">
           <Field label="பெயர் / Name" value={card.name} className="pass-name" />
           <Field label="POSTING" value="Member / உறுப்பினர்" />
@@ -90,6 +91,8 @@ async function ready(root) {
       img.addEventListener('load', finish); img.addEventListener('error', finish);
     });
   }));
+  const badge = root.querySelector('.pass-verified-badge');
+  if (badge && (!badge.complete || badge.naturalWidth === 0)) throw new Error('VERIFIED sticker is still loading. Please retry.');
 }
 
 export async function downloadIdCard(root, memberId) {

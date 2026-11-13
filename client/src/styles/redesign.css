@@ -302,7 +302,7 @@ input[readonly] { background: #eeeae0; color: #59554c; border-style: dashed; cur
 .pass-office p { font-weight: 800; white-space: nowrap; letter-spacing: -.15px; }
 .pass-office p > span { display: block; white-space: nowrap; }
 .pass-portrait { position: relative; overflow: visible; }
-.pass-portrait img.pass-verified-badge { position: absolute; width: 34px; height: 34px; right: -12px; bottom: -10px; object-fit: contain; border-radius: 0; pointer-events: none; }
+.pass-portrait img.pass-verified-badge { position: absolute; z-index: 2; width: 34px; height: 34px; right: -12px; bottom: -10px; object-fit: contain; border-radius: 0; pointer-events: none; }
 .about-page { max-width: 1180px; margin: auto; padding: 42px 20px 80px; }
 .tamil-document { display: grid; grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); gap: clamp(20px, 4vw, 60px); color: #302b22; }
 .registration-form .tamil-document { display: block; max-height: 420px; overflow: auto; padding: 18px; background: #fffdf8; border: 1px solid var(--line); border-radius: 6px; }

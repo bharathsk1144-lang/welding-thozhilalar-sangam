@@ -13,6 +13,7 @@ await mkdir(runRoot, { recursive: true });
 const card = { id: '000000000000000000000001', name: 'Synthetic Export Member', memberId: 'WTS-2026-000001',
   displayMemberId: 'WTS-TEST-REG-000001', district: 'Chennai', phoneNumber: '9876543200', dateOfBirth: '1990-01-01',
   fatherName: 'Synthetic Father', bloodGroup: 'O+', issueDate: '2026-10-21', expiresAt: '2029-10-21', isApproved: false,
+  profilePhotoPath: '/uploads/synthetic-profile.png',
   permanentAddress: 'Synthetic house address, Test Street, Chennai 600001', status: 'Active Member', verificationStatus: 'Verified' };
 let unexpectedRequests = 0;
 let registrationOtpEnabled = false;
@@ -25,6 +26,12 @@ const mock = createServer((request, response) => {
   }
   if (request.method === 'GET' && request.url === '/api/auth/registration-options') {
     response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ otpEnabled: registrationOtpEnabled })); return;
+  }
+  if (request.method === 'GET' && request.url === card.profilePhotoPath) {
+    response.setHeader('Content-Type', 'image/png');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.end(readFileSync(path.join(root, 'client', 'public', 'wts-logo-client-transparent.png')));
+    return;
   }
   const signature = request.url?.match(new RegExp(`^/api/users/${card.id}/officer-signatures/(president|secretary|treasurer)$`));
   if (request.method === 'GET' && signature) {
@@ -124,6 +131,19 @@ function assertContentPixels(rasters, geometry) {
     assert.ok(ink >= 20, `${box.label} remains visible in actual exported raster (${ink} pixels)`);
   }
 }
+function assertBadgePixels(raster, geometry) {
+  assert.ok(geometry.badge, 'approved card has sticker geometry');
+  const { x, y, width, height } = geometry.badge;
+  let green = 0;
+  for (let row = Math.ceil(y * 2); row < Math.floor((y + height) * 2); row++) {
+    for (let col = Math.ceil(Math.max(x, geometry.photoRight) * 2); col < Math.floor((x + width) * 2); col++) {
+      const i = (row * raster.width + col) * raster.channels;
+      const [red, g, blue] = raster.data.subarray(i, i + 3);
+      if (g > 90 && g > red * 1.4 && g > blue * 1.3) green++;
+    }
+  }
+  assert.ok(green >= 20, `VERIFIED artwork has visible green pixels outside the photo in the export (${green})`);
+}
 let frontend, chrome, socket;
 try {
   // Sentinels are layout fixtures only, never real/client addresses or live configuration.
@@ -185,7 +205,11 @@ try {
         const back = document.querySelector('.card-pair--export [data-card-side=back]');
         if (back && this.width >= 680) {
           const bounds = back.getBoundingClientRect();
-          window.__exportGeometry = { icons: [...back.querySelectorAll('.pass-contact-icon')].map(icon => {
+          const front = document.querySelector('.card-pair--export [data-card-side=front]');
+          const badge = front.querySelector('.pass-verified-badge')?.getBoundingClientRect();
+          const photo = front.querySelector('.pass-portrait').getBoundingClientRect();
+          const frontBounds = front.getBoundingClientRect();
+          window.__exportGeometry = { badge: badge && { x: badge.x-frontBounds.x, y: badge.y-frontBounds.y, width: badge.width, height: badge.height }, photoRight: photo.right-frontBounds.x, icons: [...back.querySelectorAll('.pass-contact-icon')].map(icon => {
             const r = icon.getBoundingClientRect(); return { label: icon.getAttribute('aria-label'), x:r.x-bounds.x, y:r.y-bounds.y, width:r.width, height:r.height };
           }), content: [
             [0, '.pass-brand__names', 'Official names'], [0, '.pass-office p', 'Front office address'],
@@ -227,12 +251,15 @@ try {
     })()`), 'approved office address fits exactly two visual lines');
     assert.equal(await evaluate("document.querySelector('.pass-front-fields .pass-field:nth-child(2) dt')?.textContent"), 'POSTING');
     assert.equal(await evaluate("document.querySelectorAll('.pass-verified-badge').length"), scenario.approved ? 1 : 0);
+    assert.ok(await until(() => evaluate("document.querySelector('.pass-portrait > img:not(.pass-verified-badge)')?.naturalWidth > 0"), 'protected synthetic photo loads'));
+    assert.equal(await evaluate("document.querySelector('.card-preview__heading [role=status]') !== null"), !scenario.approved);
     if (scenario.approved) assert.ok(await evaluate(`(() => {
       const badge = document.querySelector('.pass-verified-badge').getBoundingClientRect();
       const photo = document.querySelector('.pass-portrait').getBoundingClientRect();
       const name = document.querySelector('.pass-name').getBoundingClientRect();
       const card = document.querySelector('.member-pass--front').getBoundingClientRect();
-      return badge.width <= 36 && badge.height <= 36 && badge.left >= photo.left && badge.top >= photo.top + photo.height / 2 &&
+      return document.querySelector('.pass-verified-badge').naturalWidth > 0 && getComputedStyle(document.querySelector('.pass-verified-badge')).zIndex === '2' &&
+        badge.width <= 36 && badge.height <= 36 && badge.left >= photo.left && badge.top >= photo.top + photo.height / 2 &&
         badge.right < card.right && badge.bottom < name.top;
     })()`), 'VERIFIED sticker stays at photo bottom right without covering face, name or card edge');
     assert.ok(await until(() => evaluate("[...document.querySelectorAll('.pass-signatures img')].length === 3 && [...document.querySelectorAll('.pass-signatures img')].every(img => img.complete && img.naturalWidth > 0)"), 'three authenticated officer signature images'));
@@ -251,6 +278,13 @@ try {
     assert.ok(await evaluate("document.querySelector('.pass-brand img').getAttribute('src') === '/wts-logo-client-transparent.png' && getComputedStyle(document.querySelector('.pass-brand img')).objectFit === 'contain'"));
     for (const width of [320, 390, 1440]) {
       await command('Emulation.setDeviceMetricsOverride', { width, height: 1100, deviceScaleFactor: 1, mobile: width < 600 });
+      if (scenario.approved) assert.ok(await evaluate(`(() => {
+        const badge = document.querySelector('.pass-verified-badge').getBoundingClientRect();
+        const photo = document.querySelector('.pass-portrait').getBoundingClientRect();
+        const name = document.querySelector('.pass-name').getBoundingClientRect();
+        const front = document.querySelector('.member-pass--front').getBoundingClientRect();
+        return badge.left >= photo.left && badge.top >= photo.top + photo.height / 2 && badge.right < front.right && badge.bottom < name.top;
+      })()`), `VERIFIED badge fits beside the photo at ${width}px`);
       assert.ok(await evaluate(`(() => {
         const icons = [...document.querySelectorAll('.pass-contact-icon')].map(node => node.getBoundingClientRect());
         const logo = document.querySelector('.pass-brand img').getBoundingClientRect();
@@ -280,6 +314,7 @@ try {
       png.data.copy(back.data, y * 680 * png.channels, (y * png.width + 712) * png.channels, (y * png.width + 1392) * png.channels);
     }
     assertContentPixels([front, back], await evaluate('window.__exportGeometry'));
+    if (scenario.approved) assertBadgePixels(front, await evaluate('window.__exportGeometry'));
     console.log(`PASS ${mode}: front office address, no President home address, four social rows, Tamil, mobile layout and actual PNG content`);
     await command('Network.setBlockedURLs', { urls: [] });
     // Wait for the old download to settle before reload; otherwise readiness can
@@ -295,6 +330,7 @@ try {
     const images = pdfRasters(pdf); assert.equal(images.length, 2, 'PDF embeds both card rasters');
     assertIconPixels(images[1], await evaluate('window.__exportGeometry'));
     assertContentPixels(images, await evaluate('window.__exportGeometry'));
+    if (scenario.approved) assertBadgePixels(images[0], await evaluate('window.__exportGeometry'));
     console.log(`PASS ${mode}: two-page PDF contains all four icons, Tamil Facebook name and office without a President address section`);
     if (mode === 'missing-addresses') {
       await command('Page.navigate', { url: `${origin}/register` });
