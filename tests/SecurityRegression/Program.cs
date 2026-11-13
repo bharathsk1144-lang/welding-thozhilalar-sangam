@@ -606,6 +606,8 @@ try
         "unauthenticated member edit rejected");
     Check((await PutEdit(editRoute, edit, memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "member token cannot edit even its own record");
+    Check((await PutEdit($"/api/admin/users/{legacy.Id}", edit, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+        "member token cannot edit another member record");
     Check((await PutEdit(editRoute, new { edit.Name, edit.PhoneNumber, edit.Location, edit.DateOfBirth,
         edit.BloodGroup, edit.FatherName, edit.PermanentAddress, pincode = "bad", edit.District }, adminToken)).StatusCode == HttpStatusCode.BadRequest,
         "invalid edit rejected");
@@ -643,6 +645,31 @@ try
         "view and card export source reflect edits without changing ID, expiry or approval");
     Check((await userService.GetUsersAsync("Madurai")).Any(u => u.Id == newId && u.Name == edit.Name),
         "admin user list reflects corrected district and name");
+    if (args.Contains("--admin-edit-browser"))
+    {
+        var fixturePath = Path.Combine(runRoot, "admin-edit-browser-fixture.json");
+        await File.WriteAllTextAsync(fixturePath, System.Text.Json.JsonSerializer.Serialize(new {
+            root, runRoot, apiUrl = http.BaseAddress!.ToString().TrimEnd('/'),
+            adminToken, memberToken, userId = newId, otherId = legacy.Id
+        }));
+        var browserStart = new ProcessStartInfo("node") { UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true };
+        browserStart.ArgumentList.Add(Path.Combine(root, "tests", "browser-admin-edit.mjs"));
+        browserStart.ArgumentList.Add(fixturePath);
+        using var browser = Process.Start(browserStart)!;
+        var browserOutput = browser.StandardOutput.ReadToEndAsync();
+        var browserError = browser.StandardError.ReadToEndAsync();
+        await browser.WaitForExitAsync();
+        Console.Write(await browserOutput);
+        Console.Error.Write(await browserError);
+        Check(browser.ExitCode == 0, "browser completes Admin Users View Edit Save and updated PDF/PNG export");
+        var browserEdited = await users.Find(u => u.Id == newId).SingleAsync();
+        Check(browserEdited.Name == "Browser Edited Synthetic Member" && browserEdited.District == "Coimbatore" &&
+            browserEdited.MemberId == beforeEdit.MemberId && browserEdited.CardExpiresAt == beforeEdit.CardExpiresAt &&
+            browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == 2 &&
+            browserEdited.EditHistory[1].Changes[nameof(UserRegistration.Name)].NewValue == browserEdited.Name,
+            "browser save persists edited details and second audit entry without changing identity or expiry");
+    }
     var historicalDistrictId = Seed("9888888899", "WTS-ALR-0001");
     historicalDistrictId.CanonicalMobile = historicalDistrictId.PhoneNumber;
     historicalDistrictId.District = "Ariyalur";
