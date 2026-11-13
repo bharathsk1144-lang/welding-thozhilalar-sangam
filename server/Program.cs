@@ -214,6 +214,26 @@ using (var scope = app.Services.CreateScope())
 
 // Never accept forwarded client identity from arbitrary internet senders.
 if (trustedProxies.Length > 0) app.UseForwardedHeaders();
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        // API responses contain no HTML or public static assets. These headers also
+        // cover error responses and authorized downloads without altering CORS.
+        if (!headers.ContainsKey("Content-Security-Policy"))
+            headers["Content-Security-Policy"] = "default-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+        if (!headers.ContainsKey("X-Content-Type-Options")) headers["X-Content-Type-Options"] = "nosniff";
+        if (!headers.ContainsKey("Referrer-Policy")) headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        if (!headers.ContainsKey("Permissions-Policy"))
+            headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
+        if (!headers.ContainsKey("X-Frame-Options")) headers["X-Frame-Options"] = "DENY";
+        if (!app.Environment.IsDevelopment() && !headers.ContainsKey("Strict-Transport-Security"))
+            headers["Strict-Transport-Security"] = "max-age=31536000";
+        return Task.CompletedTask;
+    });
+    await next();
+});
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseRouting();
 app.UseCors("ClientApp");

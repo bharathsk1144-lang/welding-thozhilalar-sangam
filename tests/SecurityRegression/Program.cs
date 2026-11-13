@@ -234,6 +234,19 @@ try
     using var http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(15) };
     Check((await http.GetAsync("/api/districts")).IsSuccessStatusCode, "isolated API starts with mock delivery");
     Check((await http.GetAsync("/health/live")).IsSuccessStatusCode && (await http.GetAsync("/health/ready")).IsSuccessStatusCode, "health liveness/readiness are safe aggregates");
+    using (var hardened = await testHttp.GetAsync("/health/live"))
+    {
+        Check(hardened.Headers.TryGetValues("Content-Security-Policy", out var csp) && csp.Single().Contains("default-src 'none'") &&
+            hardened.Headers.TryGetValues("X-Content-Type-Options", out var nosniff) && nosniff.Single() == "nosniff" &&
+            hardened.Headers.TryGetValues("Referrer-Policy", out var referrer) && referrer.Single() == "strict-origin-when-cross-origin" &&
+            hardened.Headers.TryGetValues("Permissions-Policy", out var permissions) && permissions.Single().Contains("camera=()") &&
+            hardened.Headers.TryGetValues("X-Frame-Options", out var frame) && frame.Single() == "DENY",
+            "API security headers cover public health response");
+    }
+    using (var denied = await testHttp.GetAsync("/uploads/synthetic-private.png"))
+        Check(denied.StatusCode == HttpStatusCode.Unauthorized && denied.Headers.Contains("Content-Security-Policy") &&
+            denied.Headers.TryGetValues("X-Content-Type-Options", out var values) && values.Single() == "nosniff",
+            "security headers cover unauthorized private upload response");
     async Task<JsonObject> Json(HttpResponseMessage response, HttpStatusCode expected, string name)
     {
         var content = await response.Content.ReadAsStringAsync();
