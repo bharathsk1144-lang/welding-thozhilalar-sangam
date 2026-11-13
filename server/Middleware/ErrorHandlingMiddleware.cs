@@ -29,6 +29,10 @@ public sealed class ErrorHandlingMiddleware
         {
             await WriteErrorAsync(context, StatusCodes.Status409Conflict, ex.Message);
         }
+        catch (MemberEditConflictException ex)
+        {
+            await WriteErrorAsync(context, StatusCodes.Status409Conflict, ex.Message);
+        }
         catch (AmbiguousMemberIdException)
         {
             context.Response.StatusCode = StatusCodes.Status409Conflict;

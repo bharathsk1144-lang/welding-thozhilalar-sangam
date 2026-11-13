@@ -151,9 +151,15 @@ try {
     { mode: 'missing-addresses', office: '', president: '', approved: false },
     { mode: 'approved-long-addresses', office: 'OFFICE-ADDRESS-TEST-ONLY அலுவலக முகவரி '.repeat(8).trim(),
       president: 'PRESIDENT-ADDRESS-TEST-ONLY தலைவர் வீட்டு முகவரி '.repeat(8).trim(), approved: true },
-    { mode: 'unapproved-address', office: 'OFFICE-ADDRESS-TEST-ONLY', president: 'PRESIDENT-NOT-APPROVED-TEST-ONLY', approved: false }
+    { mode: 'unapproved-address', office: 'OFFICE-ADDRESS-TEST-ONLY', president: 'PRESIDENT-NOT-APPROVED-TEST-ONLY', approved: false },
+    { mode: 'corrected-member', office: '', president: '', approved: true }
   ]) {
     const { mode } = scenario;
+    if (mode === 'corrected-member') Object.assign(card, {
+      name: 'Corrected Synthetic Member', district: 'Madurai', phoneNumber: '9876543260',
+      dateOfBirth: '1991-02-03', fatherName: 'Corrected Father', bloodGroup: 'A+',
+      permanentAddress: 'Corrected synthetic address, Madurai 600002'
+    });
     card.isApproved = scenario.approved;
     registrationOtpEnabled = mode !== 'missing-addresses';
     const output = path.join(runRoot, mode); await mkdir(output);
@@ -272,6 +278,13 @@ try {
     assert.ok(await evaluate("!document.querySelector('.member-pass--back .pass-office')"), 'no office address section remains on the back');
     if (!scenario.approved && scenario.president) assert.ok(await evaluate(`!document.querySelector('.membership-card').textContent.includes(${JSON.stringify(scenario.president)})`), 'unapproved President address is not rendered');
     assert.equal(await evaluate("document.querySelector('.pass-display-id dd').textContent"), card.displayMemberId);
+    if (mode === 'corrected-member') {
+      assert.equal(await evaluate("document.querySelector('.pass-name dd').textContent"), card.name);
+      assert.equal(await evaluate("document.querySelector('.pass-front-fields .pass-field:nth-child(3) dd').textContent"), card.district);
+      assert.equal(await evaluate("document.querySelector('.pass-back-fields .pass-field:nth-child(3) dd').textContent"), card.phoneNumber);
+      assert.equal(await evaluate("document.querySelector('.pass-back-fields .pass-field:last-child dd').textContent"), card.permanentAddress);
+      assert.equal(card.issueDate, '2026-10-21'); assert.equal(card.expiresAt, '2029-10-21');
+    }
     assert.ok(await evaluate("!document.querySelector('.membership-card').textContent.toLowerCase().includes('aadhaar')"));
     assert.equal(await evaluate("document.querySelector('.pass-brand__names > span').textContent"), 'Welding Thozhilalar Sangam');
     assert.equal(await evaluate("document.querySelector('.pass-brand__names strong').textContent"), facebook);

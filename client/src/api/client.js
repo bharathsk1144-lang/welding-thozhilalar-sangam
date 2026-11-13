@@ -135,6 +135,7 @@ export const api = {
   adminUsers: (district) =>
     district ? request(`/users/by-district/${encodeURIComponent(district)}`) : request('/users'),
   adminUserDetails: (id) => request(`/users/${id}`),
+  adminUpdateUser: (id, details) => request(`/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(details) }),
   setMemberApproval: (id, approved) => request(`/admin/users/${id}/approval`, { method: 'PUT', body: JSON.stringify({ approved }) }),
   pendingPayments: () => request('/payments/pending'),
   exportUsers: () => download('/admin/users/export', `WTS-Members-Export-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}.csv`),

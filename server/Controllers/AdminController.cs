@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Globalization;
 using System.Text;
+using System.Security.Claims;
+using MongoDB.Bson;
 using WeldingThozhilalarSangam.Api.DTOs;
 using WeldingThozhilalarSangam.Api.Services;
 
@@ -113,6 +115,36 @@ public sealed class AdminController : ControllerBase
     }
 
     public sealed record ApprovalRequest(bool Approved);
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("users/{id}")]
+    public async Task<IActionResult> EditUser(string id, [FromBody] EditMemberRequest? request, [FromServices] DistrictService districts)
+    {
+        if (!ObjectId.TryParse(id, out _)) return BadRequest(new { message = "Invalid member record ID." });
+        if (request is null) return BadRequest(new { message = "Member details are required." });
+        if (request.UnexpectedFields is { Count: > 0 })
+            return BadRequest(new { message = "Only member contact and registration details can be edited here." });
+        if (!MobileNumber.TryNormalize(request.PhoneNumber, out _))
+            return BadRequest(new { message = MobileNumber.InvalidMessage });
+        if (new[] { request.Name, request.Location, request.BloodGroup, request.FatherName,
+            request.PermanentAddress, request.Pincode, request.District }.Any(string.IsNullOrWhiteSpace))
+            return BadRequest(new { message = "Required fields are missing." });
+        if (request.Name.Trim().Length > 100 || request.FatherName.Trim().Length > 100 ||
+            request.Location.Trim().Length > 150 || request.PermanentAddress.Trim().Length > 500)
+            return BadRequest(new { message = "A text field exceeds its allowed length." });
+        if (!new[] { "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-" }.Contains(request.BloodGroup.Trim()))
+            return BadRequest(new { message = "Selected blood group is invalid." });
+        if (request.Pincode.Trim().Length != 6 || !request.Pincode.Trim().All(c => c is >= '0' and <= '9'))
+            return BadRequest(new { message = "Pincode must be 6 digits." });
+        if (request.DateOfBirth == default || request.DateOfBirth.Date >= DateTime.UtcNow.Date)
+            return BadRequest(new { message = "A valid date of birth is required." });
+        if (await districts.GetByNameAsync(request.District) is null)
+            return BadRequest(new { message = "Selected district is invalid." });
+
+        var updated = await _userService.EditMemberAsync(id, request, User.FindFirstValue(ClaimTypes.Name) ?? "Admin");
+        if (updated is null) return NotFound(new { message = "User not found." });
+        return Ok(new { message = "Member details saved successfully." });
+    }
 
     [Authorize]
     [HttpGet("users/export")]

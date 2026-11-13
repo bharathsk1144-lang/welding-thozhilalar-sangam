@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Http;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WeldingThozhilalarSangam.Api.DTOs;
 
@@ -21,6 +23,21 @@ public sealed class RegisterUserRequest
     public string ConsentPolicyVersion { get; set; } = string.Empty;
     public IFormFile? AadhaarPhoto { get; set; }
     public IFormFile? ProfilePhoto { get; set; }
+}
+
+public sealed class EditMemberRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string PhoneNumber { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public DateTime DateOfBirth { get; set; }
+    public string BloodGroup { get; set; } = string.Empty;
+    public string FatherName { get; set; } = string.Empty;
+    public string PermanentAddress { get; set; } = string.Empty;
+    public string Pincode { get; set; } = string.Empty;
+    public string District { get; set; } = string.Empty;
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? UnexpectedFields { get; set; }
 }
 
 public sealed record UserListItemDto(

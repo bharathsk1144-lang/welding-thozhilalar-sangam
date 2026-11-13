@@ -160,6 +160,70 @@ public sealed class UserService
         return result.MatchedCount > 0;
     }
 
+    public async Task<UserRegistration?> EditMemberAsync(string id, EditMemberRequest request, string adminId)
+    {
+        var current = await GetByIdAsync(id);
+        if (current is null) return null;
+        var phone = MobileNumber.Normalize(request.PhoneNumber);
+        if (phone != current.CanonicalMobile && await PhoneNumberExistsAsync(phone)) throw new DuplicateMobileException();
+
+        var changes = new Dictionary<string, MemberEditChange>();
+        void Changed(string field, string before, string after)
+        {
+            if (before != after) changes[field] = new MemberEditChange { OldValue = before, NewValue = after };
+        }
+        Changed(nameof(current.Name), current.Name, request.Name.Trim());
+        Changed(nameof(current.PhoneNumber), current.PhoneNumber, phone);
+        var username = current.Username == current.PhoneNumber ? phone : current.Username;
+        Changed(nameof(current.Username), current.Username, username);
+        Changed(nameof(current.Location), current.Location, request.Location.Trim());
+        Changed(nameof(current.DateOfBirth), current.DateOfBirth.ToString("O"), request.DateOfBirth.ToString("O"));
+        Changed(nameof(current.BloodGroup), current.BloodGroup, request.BloodGroup.Trim());
+        Changed(nameof(current.FatherName), current.FatherName, request.FatherName.Trim());
+        Changed(nameof(current.PermanentAddress), current.PermanentAddress, request.PermanentAddress.Trim());
+        Changed(nameof(current.Pincode), current.Pincode, request.Pincode.Trim());
+        Changed(nameof(current.District), current.District, request.District.Trim());
+        if (changes.Count == 0) return current;
+
+        // Match the prior values so a concurrent edit cannot make the audit inaccurate.
+        var filter = Builders<UserRegistration>.Filter.Eq(u => u.Id, id) &
+            Builders<UserRegistration>.Filter.Eq(u => u.Name, current.Name) &
+            Builders<UserRegistration>.Filter.Eq(u => u.PhoneNumber, current.PhoneNumber) &
+            Builders<UserRegistration>.Filter.Eq(u => u.Location, current.Location) &
+            Builders<UserRegistration>.Filter.Eq(u => u.DateOfBirth, current.DateOfBirth) &
+            Builders<UserRegistration>.Filter.Eq(u => u.BloodGroup, current.BloodGroup) &
+            Builders<UserRegistration>.Filter.Eq(u => u.FatherName, current.FatherName) &
+            Builders<UserRegistration>.Filter.Eq(u => u.PermanentAddress, current.PermanentAddress) &
+            Builders<UserRegistration>.Filter.Eq(u => u.Pincode, current.Pincode) &
+            Builders<UserRegistration>.Filter.Eq(u => u.District, current.District);
+        var update = Builders<UserRegistration>.Update
+            .Set(u => u.Name, request.Name.Trim())
+            .Set(u => u.PhoneNumber, phone)
+            .Set(u => u.CanonicalMobile, phone)
+            .Set(u => u.Username, username)
+            .Set(u => u.Location, request.Location.Trim())
+            .Set(u => u.DateOfBirth, request.DateOfBirth)
+            .Set(u => u.BloodGroup, request.BloodGroup.Trim())
+            .Set(u => u.FatherName, request.FatherName.Trim())
+            .Set(u => u.PermanentAddress, request.PermanentAddress.Trim())
+            .Set(u => u.Pincode, request.Pincode.Trim())
+            .Set(u => u.District, request.District.Trim())
+            .Push(u => u.EditHistory, new MemberEditAudit
+            {
+                AdminId = adminId, MemberId = current.MemberId, Timestamp = DateTime.UtcNow, Changes = changes
+            });
+        try
+        {
+            var result = await _context.Users.UpdateOneAsync(filter, update);
+            if (result.MatchedCount == 0) throw new MemberEditConflictException();
+        }
+        catch (MongoWriteException ex) when (ex.WriteError.Category == ServerErrorCategory.DuplicateKey)
+        {
+            throw new DuplicateMobileException();
+        }
+        return await GetByIdAsync(id);
+    }
+
     public async Task<IReadOnlyList<PaymentPendingDto>> GetPendingPaymentsAsync()
     {
         var filter = Builders<UserRegistration>.Filter.Eq(u => u.PaymentStatus, "Pending") &
@@ -299,4 +363,9 @@ public sealed class UserService
     {
         return string.IsNullOrWhiteSpace(user.MemberId) ? "Pending" : "Ready";
     }
+}
+
+public sealed class MemberEditConflictException : Exception
+{
+    public MemberEditConflictException() : base("This member changed while you were editing. Refresh and try again.") { }
 }

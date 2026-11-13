@@ -44,4 +44,19 @@ public sealed class UserRegistration
     public bool ConsentAccepted { get; set; }
     public DateTime? ConsentAcceptedAt { get; set; }
     public string? ConsentPolicyVersion { get; set; }
+    public List<MemberEditAudit> EditHistory { get; set; } = [];
+}
+
+public sealed class MemberEditAudit
+{
+    public string AdminId { get; set; } = string.Empty;
+    public string MemberId { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
+    public Dictionary<string, MemberEditChange> Changes { get; set; } = [];
+}
+
+public sealed class MemberEditChange
+{
+    public string OldValue { get; set; } = string.Empty;
+    public string NewValue { get; set; } = string.Empty;
 }

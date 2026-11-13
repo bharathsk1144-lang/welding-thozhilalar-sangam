@@ -590,6 +590,59 @@ try
     Check(CardValidity.Expiry(new DateTime(2026, 11, 12, 12, 0, 0, DateTimeKind.Utc)) == new DateTime(2029, 11, 12, 12, 0, 0, DateTimeKind.Utc) &&
         CardValidity.Expiry(new DateTime(2024, 2, 29, 12, 0, 0, DateTimeKind.Utc)) == new DateTime(2027, 2, 28, 12, 0, 0, DateTimeKind.Utc),
         "calendar-year expiry handles ordinary and leap-day dates");
+    // Corrections exercise a synthetic registration in this isolated database only.
+    var editRoute = $"/api/admin/users/{newId}";
+    var edit = new EditMemberRequest { Name = "Corrected synthetic member", PhoneNumber = "9876543260",
+        Location = "New posting", DateOfBirth = new DateTime(1991, 2, 3, 0, 0, 0, DateTimeKind.Utc),
+        BloodGroup = "A+", FatherName = "Corrected father", PermanentAddress = "Corrected test address",
+        Pincode = "600002", District = "Madurai" };
+    async Task<HttpResponseMessage> PutEdit(string target, object body, string? bearer)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Put, target) { Content = JsonContent.Create(body) };
+        if (bearer is not null) message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        return await http.SendAsync(message);
+    }
+    Check((await PutEdit(editRoute, edit, null)).StatusCode == HttpStatusCode.Unauthorized,
+        "unauthenticated member edit rejected");
+    Check((await PutEdit(editRoute, edit, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+        "member token cannot edit even its own record");
+    Check((await PutEdit(editRoute, new { edit.Name, edit.PhoneNumber, edit.Location, edit.DateOfBirth,
+        edit.BloodGroup, edit.FatherName, edit.PermanentAddress, pincode = "bad", edit.District }, adminToken)).StatusCode == HttpStatusCode.BadRequest,
+        "invalid edit rejected");
+    Check((await PutEdit(editRoute, new { edit.Name, edit.PhoneNumber, edit.Location, edit.DateOfBirth,
+        edit.BloodGroup, edit.FatherName, edit.PermanentAddress, edit.Pincode, edit.District, memberId = legacy.MemberId }, adminToken)).StatusCode == HttpStatusCode.BadRequest,
+        "request cannot replace member identity");
+    edit.PhoneNumber = "9876543210";
+    Check((await PutEdit(editRoute, edit, adminToken)).StatusCode == HttpStatusCode.Conflict,
+        "duplicate mobile edit rejected");
+    edit.PhoneNumber = "9876543260";
+    var beforeEdit = await users.Find(u => u.Id == newId).SingleAsync();
+    await Json(await PutEdit(editRoute, edit, adminToken), HttpStatusCode.OK, "admin saves corrected member details");
+    var afterEdit = await users.Find(u => u.Id == newId).SingleAsync();
+    Check(afterEdit.Name == edit.Name && afterEdit.District == edit.District && afterEdit.PhoneNumber == edit.PhoneNumber &&
+        afterEdit.CanonicalMobile == edit.PhoneNumber && afterEdit.Location == edit.Location &&
+        afterEdit.MemberId == beforeEdit.MemberId && afterEdit.IdSchemeVersion == beforeEdit.IdSchemeVersion &&
+        afterEdit.CreatedAt == beforeEdit.CreatedAt && afterEdit.CardExpiresAt == beforeEdit.CardExpiresAt &&
+        afterEdit.ApprovedAt == beforeEdit.ApprovedAt && afterEdit.PasswordHash == beforeEdit.PasswordHash &&
+        afterEdit.AadhaarPhotoPath == beforeEdit.AadhaarPhotoPath && afterEdit.ProfilePhotoPath == beforeEdit.ProfilePhotoPath &&
+        afterEdit.VerificationStatus == beforeEdit.VerificationStatus && afterEdit.ConsentAcceptedAt == beforeEdit.ConsentAcceptedAt &&
+        afterEdit.ConsentPolicyVersion == beforeEdit.ConsentPolicyVersion,
+        "edit updates allowed fields and preserves identity, expiry, approval, consent and documents");
+    Check(afterEdit.EditHistory.Count == 1 && afterEdit.EditHistory[0].AdminId == "test-admin" &&
+        afterEdit.EditHistory[0].MemberId == beforeEdit.MemberId &&
+        afterEdit.EditHistory[0].Changes[nameof(UserRegistration.Name)].NewValue == edit.Name &&
+        afterEdit.EditHistory[0].Timestamp > beforeEdit.CreatedAt,
+        "atomic audit records admin, member, changes and timestamp");
+    var detailAfterEdit = await Json(await GetWithToken($"/api/users/{newId}", adminToken), HttpStatusCode.OK, "admin refreshed member view");
+    var cardAfterEdit = await Json(await GetWithToken($"/api/users/{newId}/id-card", adminToken), HttpStatusCode.OK, "admin refreshed card preview");
+    Check(detailAfterEdit["name"]!.GetValue<string>() == edit.Name && cardAfterEdit["name"]!.GetValue<string>() == edit.Name &&
+        cardAfterEdit["district"]!.GetValue<string>() == edit.District &&
+        cardAfterEdit["memberId"]!.GetValue<string>() == beforeEdit.MemberId &&
+        cardAfterEdit["expiresAt"]!.GetValue<DateTime>() == beforeEdit.CardExpiresAt &&
+        cardAfterEdit["isApproved"]!.GetValue<bool>() == beforeEdit.ApprovedAt.HasValue,
+        "view and card export source reflect edits without changing ID, expiry or approval");
+    Check((await userService.GetUsersAsync("Madurai")).Any(u => u.Id == newId && u.Name == edit.Name),
+        "admin user list reflects corrected district and name");
     var historicalDistrictId = Seed("9888888899", "WTS-ALR-0001");
     historicalDistrictId.CanonicalMobile = historicalDistrictId.PhoneNumber;
     historicalDistrictId.District = "Ariyalur";
