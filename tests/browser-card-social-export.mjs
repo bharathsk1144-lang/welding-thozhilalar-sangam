@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { inflateSync } from 'node:zlib';
+import jsQR from '../client/node_modules/jsqr/dist/jsQR.js';
 
 // Frontend-only export regression. The mock API has synthetic GET fixtures and no database.
 const root = process.cwd();
@@ -26,6 +27,11 @@ const mock = createServer((request, response) => {
   }
   if (request.method === 'GET' && request.url === '/api/auth/registration-options') {
     response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ otpEnabled: registrationOtpEnabled })); return;
+  }
+  if (request.method === 'GET' && request.url === '/api/website-content') {
+    response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({
+      aboutMarkdown: readFileSync(path.join(root, 'client', 'src', 'content', 'about-tamil.md'), 'utf8'), gallery: [], products: [], revision: 0
+    })); return;
   }
   if (request.method === 'GET' && request.url === card.profilePhotoPath) {
     response.setHeader('Content-Type', 'image/png');
@@ -143,6 +149,14 @@ function assertBadgePixels(raster, geometry) {
     }
   }
   assert.ok(green >= 20, `VERIFIED artwork has visible green pixels outside the photo in the export (${green})`);
+}
+function qrDestination(raster) {
+  const rgba = new Uint8ClampedArray(raster.width * raster.height * 4);
+  for (let pixel = 0; pixel < raster.width * raster.height; pixel++) {
+    for (let color = 0; color < 3; color++) rgba[pixel * 4 + color] = raster.data[pixel * raster.channels + color];
+    rgba[pixel * 4 + 3] = 255;
+  }
+  return jsQR(rgba, raster.width, raster.height)?.data;
 }
 let frontend, chrome, socket;
 try {
@@ -270,18 +284,19 @@ try {
     })()`), 'VERIFIED sticker stays at photo bottom right without covering face, name or card edge');
     assert.ok(await until(() => evaluate("[...document.querySelectorAll('.pass-signatures img')].length === 3 && [...document.querySelectorAll('.pass-signatures img')].every(img => img.complete && img.naturalWidth > 0)"), 'three authenticated officer signature images'));
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.pass-signatures > div')].map(node => [node.querySelector('strong').textContent, ...[...node.querySelectorAll('small')].map(x => x.textContent)])"), [
-      ['A. முரளி', 'மாநில தலைவர்', 'State President'],
+      ['A. முரளிதரன்', 'மாநில தலைவர்', 'State President'],
       ['K. சங்கர்', 'மாநில செயலாளர்', 'State Secretary'],
       ['S. விக்னேஷ்', 'மாநில பொருளாளர்', 'State Treasurer']
     ]);
     assert.ok(await evaluate("!document.querySelector('.pass-president') && !document.querySelector('.membership-card').textContent.includes('President’s Home Address') && !document.querySelector('.membership-card').textContent.includes(\"President's Home Address\")"), 'President home address section is absent from both card sides');
     assert.ok(await evaluate("!document.querySelector('.member-pass--back .pass-office')"), 'no office address section remains on the back');
     if (!scenario.approved && scenario.president) assert.ok(await evaluate(`!document.querySelector('.membership-card').textContent.includes(${JSON.stringify(scenario.president)})`), 'unapproved President address is not rendered');
-    assert.equal(await evaluate("document.querySelector('.pass-display-id dd').textContent"), card.displayMemberId);
+    assert.equal(await evaluate("document.querySelector('.member-pass--front .pass-id dd').textContent"), card.displayMemberId);
+    assert.equal(await evaluate("document.querySelector('.member-pass--back').textContent.includes('Member ID')"), false);
     if (mode === 'corrected-member') {
       assert.equal(await evaluate("document.querySelector('.pass-name dd').textContent"), card.name);
       assert.equal(await evaluate("document.querySelector('.pass-front-fields .pass-field:nth-child(3) dd').textContent"), card.district);
-      assert.equal(await evaluate("document.querySelector('.pass-back-fields .pass-field:nth-child(3) dd').textContent"), card.phoneNumber);
+      assert.equal(await evaluate("document.querySelector('.pass-back-fields .pass-field:nth-child(2) dd').textContent"), card.phoneNumber);
       assert.equal(await evaluate("document.querySelector('.pass-back-fields .pass-field:last-child dd').textContent"), card.permanentAddress);
       assert.equal(card.issueDate, '2026-10-21'); assert.equal(card.expiresAt, '2029-10-21');
     }
@@ -327,6 +342,7 @@ try {
       png.data.copy(back.data, y * 680 * png.channels, (y * png.width + 712) * png.channels, (y * png.width + 1392) * png.channels);
     }
     assertContentPixels([front, back], await evaluate('window.__exportGeometry'));
+    assert.equal(qrDestination(back), 'https://www.weldingthozhilalarsangam.com/', 'PNG back QR scans to official HTTPS website');
     if (scenario.approved) assertBadgePixels(front, await evaluate('window.__exportGeometry'));
     console.log(`PASS ${mode}: front office address, no President home address, four social rows, Tamil, mobile layout and actual PNG content`);
     await command('Network.setBlockedURLs', { urls: [] });
@@ -343,6 +359,7 @@ try {
     const images = pdfRasters(pdf); assert.equal(images.length, 2, 'PDF embeds both card rasters');
     assertIconPixels(images[1], await evaluate('window.__exportGeometry'));
     assertContentPixels(images, await evaluate('window.__exportGeometry'));
+    assert.equal(qrDestination(images[1]), 'https://www.weldingthozhilalarsangam.com/', 'PDF back QR scans to official HTTPS website');
     if (scenario.approved) assertBadgePixels(images[0], await evaluate('window.__exportGeometry'));
     console.log(`PASS ${mode}: two-page PDF contains all four icons, Tamil Facebook name and office without a President address section`);
     if (mode === 'missing-addresses') {
@@ -366,6 +383,23 @@ try {
           document.querySelector('.registration-form .tamil-document').textContent.includes('மூன்று ஆண்டுகளுக்கு ஒருமுறை அடையாள அட்டை புதுப்பித்து') &&
           document.querySelector('.registration-form .tamil-document').textContent.includes('நமது சங்கத்தின் முக்கியக் கொள்கை');
       })()`), 'all ten registration rules and pledge are visible before unchecked consent');
+      await evaluate(`(() => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        for (const [name, value] of [['dateOfBirth', '29-02-2000'], ['pincode', '600001']]) {
+          const input = document.querySelector('input[name=' + name + ']');
+          setter.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const address = document.querySelector('textarea[name=permanentAddress]');
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(address, 'Synthetic restored address');
+        address.dispatchEvent(new Event('input', { bubbles: true }));
+        document.dispatchEvent(new Event('visibilitychange'));
+      })()`);
+      await until(() => evaluate("sessionStorage.getItem('wtsRegistrationDraftV1')?.includes('Synthetic restored address')"), 'registration draft persisted');
+      assert.ok(await evaluate("!sessionStorage.getItem('wtsRegistrationDraftV1').includes('password') && !sessionStorage.getItem('wtsRegistrationDraftV1').includes('aadhaarPhoto')"));
+      await command('Page.reload');
+      await until(() => evaluate("document.querySelector('.form-panel form') !== null && document.querySelector('.notice.success')?.textContent.includes('Your registration details have been restored.')"), 'draft recovery notice');
+      await evaluate("document.querySelector('.form-panel form').requestSubmit()");
+      await until(() => evaluate("document.querySelector('textarea[name=permanentAddress]')?.value === 'Synthetic restored address' && document.querySelector('input[name=dateOfBirth]')?.value === '29-02-2000'"), 'draft form values restored');
       console.log('PASS registration: identity continues to details without OTP or a write request');
       await command('Page.navigate', { url: `${origin}/about` });
       await until(() => evaluate("document.querySelectorAll('.tamil-document__body h1[id^=part-]').length === 8"), 'full About page');

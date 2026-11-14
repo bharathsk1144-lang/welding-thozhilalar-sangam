@@ -16,12 +16,14 @@ public sealed class MongoContext
         Districts = database.GetCollection<District>("Districts");
         PrivateUploads = database.GetCollection<PrivateUploadRecord>("PrivateUploads");
         MemberSequences = database.GetCollection<MemberSequence>("MemberSequences");
+        WebsiteContents = database.GetCollection<WebsiteContent>("WebsiteContents");
     }
 
     public IMongoCollection<UserRegistration> Users { get; }
     public IMongoCollection<District> Districts { get; }
     public IMongoCollection<PrivateUploadRecord> PrivateUploads { get; }
     public IMongoCollection<MemberSequence> MemberSequences { get; }
+    public IMongoCollection<WebsiteContent> WebsiteContents { get; }
 
     public async Task EnsureIndexesAsync()
     {

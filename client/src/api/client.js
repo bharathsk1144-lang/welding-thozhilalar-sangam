@@ -117,6 +117,10 @@ async function download(path, fallbackFileName) {
 
 export const api = {
   getDistricts: () => request('/districts'),
+  websiteContent: () => request('/website-content'),
+  contentHistory: () => request('/website-content/history'),
+  saveWebsiteContent: (payload) => request('/website-content', { method: 'PUT', body: JSON.stringify(payload) }),
+  uploadContentImage: (image) => { const body = new FormData(); body.append('image', image); return request('/website-content/images', { method: 'POST', body }); },
   getRegistrationOptions: () => request('/auth/registration-options'),
   sendOtp: (payload) => request('/auth/send-otp', { method: 'POST', body: JSON.stringify(payload) }),
   verifyOtp: (payload) => request('/auth/verify-otp', { method: 'POST', body: JSON.stringify(payload) }),
@@ -136,6 +140,8 @@ export const api = {
     district ? request(`/users/by-district/${encodeURIComponent(district)}`) : request('/users'),
   adminUserDetails: (id) => request(`/users/${id}`),
   adminUpdateUser: (id, details) => request(`/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(details) }),
+  adminReplacePhoto: (id, photo) => { const body = new FormData(); body.append('photo', photo); return request(`/admin/users/${encodeURIComponent(id)}/profile-photo`, { method: 'POST', body }); },
+  adminReviewDocument: (id, details) => request(`/admin/users/${encodeURIComponent(id)}/document-review`, { method: 'PUT', body: JSON.stringify(details) }),
   setMemberApproval: (id, approved) => request(`/admin/users/${id}/approval`, { method: 'PUT', body: JSON.stringify({ approved }) }),
   pendingPayments: () => request('/payments/pending'),
   exportUsers: () => download('/admin/users/export', `WTS-Members-Export-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}.csv`),
@@ -144,6 +150,8 @@ export const api = {
   idCard: (id) => {
     return request(`/users/${id}/id-card`, { headers: memberHeaders(id) });
   },
+  documentStatus: (id) => request(`/users/${encodeURIComponent(id)}/document-status`, { headers: memberHeaders(id) }),
+  correctDocument: (id, kind, image) => { const body = new FormData(); body.append('image', image); return request(`/users/${encodeURIComponent(id)}/document-correction/${kind}`, { method: 'POST', body, headers: memberHeaders(id) }); },
   createDistrict: (payload) => request('/districts', { method: 'POST', body: JSON.stringify(payload) }),
   updateDistrict: (id, payload) => request(`/districts/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
 };

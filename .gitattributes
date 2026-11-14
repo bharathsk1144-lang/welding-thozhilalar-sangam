@@ -1,0 +1,4 @@
+# Keep vendored model runtimes byte-for-byte identical to the pinned packages.
+client/public/vision/* -text -diff
+client/public/ocr/*.wasm.js -text -diff
+client/public/ocr/worker.min.js -text -diff

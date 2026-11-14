@@ -50,7 +50,7 @@ test('confirmed office details are shared defaults and remain configurable', () 
 
 test('approved officer names and designations remain paired with their signature slots', () => {
   assert.deepEqual(officeBearers, [
-    { officer: 'president', name: 'A. முரளி', roleTamil: 'மாநில தலைவர்', roleEnglish: 'State President' },
+    { officer: 'president', name: 'A. முரளிதரன்', roleTamil: 'மாநில தலைவர்', roleEnglish: 'State President' },
     { officer: 'secretary', name: 'K. சங்கர்', roleTamil: 'மாநில செயலாளர்', roleEnglish: 'State Secretary' },
     { officer: 'treasurer', name: 'S. விக்னேஷ்', roleTamil: 'மாநில பொருளாளர்', roleEnglish: 'State Treasurer' }
   ]);

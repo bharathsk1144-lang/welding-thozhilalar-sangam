@@ -32,10 +32,12 @@ export default function AppShell({ children, admin = false }) {
         </button>
         <nav id="main-navigation" className={`topnav${menuOpen ? ' topnav--open' : ''}`} aria-label="Primary navigation">
           <Link to="/about"><span lang="ta">சங்கம் பற்றி</span><small>About us</small></Link>
+          <NavLink className={navClass} to="/gallery">Gallery</NavLink>
+          <NavLink className={navClass} to="/products">Products</NavLink>
           <NavLink className={navClass} to="/verify-member"><span lang="ta">உறுப்பினர் சரிபார்ப்பு</span><small>Verify member</small></NavLink>
           <NavLink className={navClass} to="/user-login"><span lang="ta">உறுப்பினர் உள்நுழைவு</span><small>User login</small></NavLink>
           <NavLink className={({ isActive }) => `nav-enrol${isActive ? ' is-active' : ''}`} to="/register"><span lang="ta">உறுப்பினராக இணைக</span><small>New registration <span aria-hidden="true">↗</span></small></NavLink>
-          {admin ? <NavLink to="/admin/dashboard" className={navClass}>Dashboard</NavLink> : <NavLink to="/admin/login" className="nav-admin">Admin</NavLink>}
+          {admin ? <><NavLink to="/admin/dashboard" className={navClass}>Dashboard</NavLink><NavLink to="/admin/website-content" className={navClass}>Website Content</NavLink></> : <NavLink to="/admin/login" className="nav-admin">Admin</NavLink>}
         </nav>
       </header>
       <main id="main-content" tabIndex="-1">{children}</main>

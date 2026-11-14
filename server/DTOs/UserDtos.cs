@@ -82,7 +82,10 @@ public sealed record UserDetailsDto(
     DateTime? VerifiedAt,
     string VerifiedBy,
     bool ConsentAccepted,
-    DateTime? ConsentAcceptedAt) : IMemberIdView
+    DateTime? ConsentAcceptedAt,
+    string ProfilePhotoReviewStatus = "Needs review",
+    string AadhaarReviewStatus = "Needs review",
+    string DocumentCorrectionRequest = "") : IMemberIdView
 {
     public string DisplayMemberId { get; set; } = MemberId;
     public string? MemberIdDisplayWarning { get; set; }

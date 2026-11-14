@@ -4,12 +4,17 @@ import ProtectedOfficerSignature from './ProtectedOfficerSignature.jsx';
 import OrganizationContactIcon from './OrganizationContactIcon.jsx';
 import { branding, officeBearers, organizationContactRows } from '../config/branding.js';
 import { memberIdDisplay, memberIdFilePart } from '../api/memberId.js';
+import WebsiteQr from './WebsiteQr.jsx';
 
 const text = (value, missing = 'Not recorded') => String(value ?? '').trim() || missing;
 function date(value) {
   const parsed = value ? new Date(value) : null;
   return !parsed || Number.isNaN(parsed.getTime()) || parsed.getFullYear() < 1900 ? 'Not recorded'
     : parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+}
+function dobDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || '');
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : date(value);
 }
 function Field({ label, value, className = '' }) {
   return <div className={`pass-field ${className}`}><dt>{label}</dt><dd>{text(value)}</dd></div>;
@@ -55,8 +60,7 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
       <article className="member-pass member-pass--back" data-card-side="back" aria-label="Back of membership card">
         <header className="pass-back-heading"><strong>{branding.nameEnglish}</strong><span>MEMBER PARTICULARS · BACK</span></header>
         <dl className="pass-back-fields">
-          <Field label="உறுப்பினர் எண் / Member ID" value={text(displayId, 'Awaiting assignment')} className="pass-display-id" />
-          <Field label="பிறந்த தேதி / DOB" value={date(card.dateOfBirth)} />
+          <Field label="பிறந்த தேதி / DOB" value={dobDate(card.dateOfBirth)} />
           <Field label="அலைபேசி / Mobile" value={card.phoneNumber} />
           <Field label="இரத்த வகை / Blood group" value={card.bloodGroup} />
           <Field label="தந்தை பெயர் / Father" value={card.fatherName} />
@@ -64,10 +68,10 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
           <Field label="காலாவதி தேதி / Expires" value={date(card.expiresAt)} />
           <Field label="வீட்டு முகவரி / House address" value={card.permanentAddress} className="pass-address" />
         </dl>
-        {displayId !== card.memberId && card.memberId && <p className="pass-stored-id">Original printed ID: <strong>{card.memberId}</strong></p>}
         {card.memberIdDisplayWarning && <p className="pass-id-warning" role="status">{card.memberIdDisplayWarning}</p>}
         <section className="pass-organization-contact" aria-label="Organization social and website details">
           <dl>{organizationContactRows().map(({ label, value }) => <div key={label}><dt><OrganizationContactIcon label={label} /></dt><dd>{value}</dd></div>)}</dl>
+          <WebsiteQr />
         </section>
         <footer className="pass-footer pass-return-note"><p lang="ta">இந்த அட்டை சங்க உறுப்பினர் அடையாளத்திற்கானது. கண்டெடுக்கப்பட்டால் சங்க அலுவலகத்தைத் தொடர்பு கொள்ளவும்.</p><span>Private union membership · Not a government ID</span></footer>
       </article>
@@ -77,8 +81,8 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
 
 async function ready(root) {
   const deadline = Date.now() + 12000;
-  while (root.querySelector('[data-image-pending="true"]')) {
-    if (Date.now() > deadline) throw new Error('Passport photo is still loading. Please retry.');
+  while (root.querySelector('[data-image-pending="true"]') || !root.querySelector('.pass-website-qr img')) {
+    if (Date.now() > deadline) throw new Error('Card images are still loading. Please retry.');
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (root.querySelector('[data-signature-unavailable="true"]')) throw new Error('Officer signature is unavailable. Please retry.');

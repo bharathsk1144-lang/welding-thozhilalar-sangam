@@ -102,7 +102,10 @@ public sealed class AdminController : ControllerBase
             user.VerifiedAt,
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
             user.ConsentAccepted,
-            user.ConsentAcceptedAt)));
+            user.ConsentAcceptedAt,
+            user.ProfilePhotoReviewStatus,
+            user.AadhaarReviewStatus,
+            user.DocumentCorrectionRequest)));
     }
 
     [Authorize]
@@ -115,6 +118,42 @@ public sealed class AdminController : ControllerBase
     }
 
     public sealed record ApprovalRequest(bool Approved);
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("users/{id}/profile-photo")]
+    [RequestSizeLimit(4 * 1024 * 1024)]
+    public async Task<IActionResult> ReplaceProfilePhoto(string id, IFormFile? photo, [FromServices] IPrivateUploadStorage uploads)
+    {
+        if (!ObjectId.TryParse(id, out _)) return BadRequest(new { message = "Invalid member record ID." });
+        var error = await UploadValidation.ValidateAsync(photo, 3 * 1024 * 1024, "Passport photo");
+        if (error is not null) return BadRequest(new { message = error });
+        var (imageError, _) = await ImageSuitability.CheckAsync(photo!, true, HttpContext.RequestAborted);
+        if (imageError is not null) return BadRequest(new { message = imageError });
+        if (await _userService.GetByIdAsync(id) is null) return NotFound();
+        var path = await uploads.SaveAsync(photo!, "profile", HttpContext.RequestAborted);
+        try
+        {
+            var member = await _userService.ReplaceProfilePhotoAsync(id, path, User.FindFirstValue(ClaimTypes.Name) ?? "Admin");
+            return Ok(new { message = "Photo updated. Review its suitability before approval.", profilePhotoPath = member!.ProfilePhotoPath });
+        }
+        catch { await uploads.DeleteAsync(path); throw; }
+    }
+
+    public sealed record DocumentReviewRequest(string Kind, string Status, string? Correction);
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("users/{id}/document-review")]
+    public async Task<IActionResult> ReviewDocument(string id, [FromBody] DocumentReviewRequest request)
+    {
+        if (!ObjectId.TryParse(id, out _) || request.Kind is not ("aadhaar" or "profile") ||
+            request.Status is not ("Needs review" or "Accepted" or "Correction requested") ||
+            (request.Correction?.Length ?? 0) > 400)
+            return BadRequest(new { message = "Invalid document review." });
+        var member = await _userService.SetDocumentReviewAsync(id, request.Kind, request.Status,
+            request.Status == "Correction requested" ? request.Correction?.Trim() ?? "Please upload a clearer image." : string.Empty,
+            User.FindFirstValue(ClaimTypes.Name) ?? "Admin");
+        return member is null ? NotFound() : Ok(new { message = "Review status saved." });
+    }
 
     [Authorize(Roles = "Admin")]
     [HttpPut("users/{id}")]

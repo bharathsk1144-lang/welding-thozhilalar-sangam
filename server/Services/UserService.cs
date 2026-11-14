@@ -224,6 +224,72 @@ public sealed class UserService
         return await GetByIdAsync(id);
     }
 
+    public async Task<UserRegistration?> ReplaceProfilePhotoAsync(string id, string newPath, string adminId)
+    {
+        var current = await GetByIdAsync(id);
+        if (current is null) return null;
+        var filter = Builders<UserRegistration>.Filter.Eq(u => u.Id, id) &
+            Builders<UserRegistration>.Filter.Eq(u => u.ProfilePhotoPath, current.ProfilePhotoPath);
+        var audit = new MemberEditAudit
+        {
+            AdminId = adminId, MemberId = current.MemberId, Timestamp = DateTime.UtcNow,
+            Changes = new Dictionary<string, MemberEditChange> {
+                [nameof(UserRegistration.ProfilePhotoPath)] = new() { OldValue = current.ProfilePhotoPath, NewValue = newPath }
+            }
+        };
+        var update = Builders<UserRegistration>.Update.Set(u => u.ProfilePhotoPath, newPath)
+            .Set(u => u.ProfilePhotoReviewStatus, "Needs review")
+            .Push(u => u.EditHistory, audit);
+        var result = await _context.Users.UpdateOneAsync(filter, update);
+        if (result.MatchedCount == 0) throw new MemberEditConflictException();
+        return await GetByIdAsync(id);
+    }
+
+    public async Task<UserRegistration?> ReplaceRequestedDocumentAsync(string id, string kind, string newPath)
+    {
+        var current = await GetByIdAsync(id);
+        if (current is null) return null;
+        var oldPath = kind == "aadhaar" ? current.AadhaarPhotoPath : current.ProfilePhotoPath;
+        var status = kind == "aadhaar" ? current.AadhaarReviewStatus : current.ProfilePhotoReviewStatus;
+        if (status != "Correction requested") throw new InvalidOperationException("No document correction is requested.");
+        var update = (kind == "aadhaar"
+            ? Builders<UserRegistration>.Update.Set(u => u.AadhaarPhotoPath, newPath).Set(u => u.AadhaarReviewStatus, "Needs review")
+            : Builders<UserRegistration>.Update.Set(u => u.ProfilePhotoPath, newPath).Set(u => u.ProfilePhotoReviewStatus, "Needs review"))
+            .Set(u => u.DocumentCorrectionRequest, string.Empty)
+            .Push(u => u.EditHistory, new MemberEditAudit {
+                AdminId = "Member document correction", MemberId = current.MemberId, Timestamp = DateTime.UtcNow,
+                Changes = new Dictionary<string, MemberEditChange> {
+                    [kind == "aadhaar" ? nameof(UserRegistration.AadhaarPhotoPath) : nameof(UserRegistration.ProfilePhotoPath)] = new() { OldValue = oldPath, NewValue = newPath }
+                }
+            });
+        var filter = Builders<UserRegistration>.Filter.Eq(u => u.Id, id) &
+            (kind == "aadhaar" ? Builders<UserRegistration>.Filter.Eq(u => u.AadhaarPhotoPath, oldPath) : Builders<UserRegistration>.Filter.Eq(u => u.ProfilePhotoPath, oldPath));
+        var result = await _context.Users.UpdateOneAsync(filter, update);
+        if (result.MatchedCount == 0) throw new MemberEditConflictException();
+        return await GetByIdAsync(id);
+    }
+
+    public async Task<UserRegistration?> SetDocumentReviewAsync(string id, string kind, string status, string correction, string adminId)
+    {
+        var current = await GetByIdAsync(id);
+        if (current is null) return null;
+        var field = kind == "aadhaar" ? nameof(UserRegistration.AadhaarReviewStatus) : nameof(UserRegistration.ProfilePhotoReviewStatus);
+        var previous = kind == "aadhaar" ? current.AadhaarReviewStatus : current.ProfilePhotoReviewStatus;
+        var update = (kind == "aadhaar"
+            ? Builders<UserRegistration>.Update.Set(u => u.AadhaarReviewStatus, status)
+            : Builders<UserRegistration>.Update.Set(u => u.ProfilePhotoReviewStatus, status))
+            .Set(u => u.DocumentCorrectionRequest, correction)
+            .Push(u => u.EditHistory, new MemberEditAudit {
+                AdminId = adminId, MemberId = current.MemberId, Timestamp = DateTime.UtcNow,
+                Changes = new Dictionary<string, MemberEditChange> {
+                    [field] = new() { OldValue = previous, NewValue = status },
+                    [nameof(UserRegistration.DocumentCorrectionRequest)] = new() { OldValue = current.DocumentCorrectionRequest, NewValue = correction }
+                }
+            });
+        await _context.Users.UpdateOneAsync(u => u.Id == id, update);
+        return await GetByIdAsync(id);
+    }
+
     public async Task<IReadOnlyList<PaymentPendingDto>> GetPendingPaymentsAsync()
     {
         var filter = Builders<UserRegistration>.Filter.Eq(u => u.PaymentStatus, "Pending") &

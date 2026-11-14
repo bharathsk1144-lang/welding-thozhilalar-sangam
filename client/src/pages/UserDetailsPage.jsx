@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell.jsx';
 import MembershipIdCard, { downloadIdCard } from '../components/MembershipIdCard.jsx';
-import { api } from '../api/client.js';
+import { api, privateImage } from '../api/client.js';
 import { memberIdDisplay } from '../api/memberId.js';
 import ProtectedImage from '../components/ProtectedImage.jsx';
 import { normalizeMobile, MOBILE_PATTERN } from '../api/mobile.js';
+import PhotoCropper from '../components/PhotoCropper.jsx';
+import { inspectImage } from '../api/imageSuitability.js';
+import { isoToDob } from '../api/dob.js';
 
 const editableFields = ['name', 'phoneNumber', 'location', 'dateOfBirth', 'bloodGroup', 'fatherName', 'permanentAddress', 'pincode', 'district'];
 const editValues = (member) => Object.fromEntries(editableFields.map((field) => [field,
@@ -26,6 +29,7 @@ export default function UserDetailsPage() {
   const [districts, setDistricts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [cropFile, setCropFile] = useState(null);
 
   useEffect(() => {
     api.adminUserDetails(id).then(setUser).catch((err) => setError(err.message));
@@ -92,6 +96,38 @@ export default function UserDetailsPage() {
     } catch (err) { setError(err.message || 'Unable to update member approval.'); }
   }
 
+  async function replacePhoto(photo) {
+    const check = await inspectImage(photo, 'passport');
+    if (check.error) { setError(check.error); return; }
+    setSaving(true); setError('');
+    try {
+      await api.adminReplacePhoto(id, photo);
+      const [updated, updatedCard] = await Promise.all([api.adminUserDetails(id), api.idCard(id)]);
+      setUser(updated); setCard(updatedCard); setCropFile(null);
+      setMessage('Passport photo updated in profile and ID card. Review suitability before approval.');
+    } catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  }
+
+  async function cropCurrentPhoto() {
+    setError('');
+    try {
+      const blob = await privateImage(user.profilePhotoPath, id, true);
+      const extension = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg';
+      setCropFile(new File([blob], `current-passport.${extension}`, { type: blob.type }));
+    } catch { setError('Unable to open the current private photo. Choose a replacement photo.'); }
+  }
+
+  async function reviewDocument(kind, status) {
+    const correction = status === 'Correction requested' ? window.prompt('Correction requested from member (no Aadhaar number):', 'Please provide a clearer image.') : '';
+    if (correction === null) return;
+    try {
+      await api.adminReviewDocument(id, { kind, status, correction });
+      setUser(await api.adminUserDetails(id));
+      setMessage('Document review saved.');
+    } catch (err) { setError(err.message); }
+  }
+
   return (
     <AppShell admin>
       <section className="details-wrap">
@@ -116,7 +152,7 @@ export default function UserDetailsPage() {
                 <div className="form-grid two">
                   <label><span>Name</span><input required maxLength={100} name="name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
                   <label><span>Mobile Number</span><input required name="phoneNumber" inputMode="numeric" pattern={MOBILE_PATTERN} value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} /></label>
-                  <label><span>Location / Posting</span><input required maxLength={150} name="location" value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
+                  <label><span>Location / Posting (legacy, optional)</span><input maxLength={150} name="location" value={form.location || ''} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
                   <label><span>Date of Birth</span><input required type="date" name="dateOfBirth" value={form.dateOfBirth} onChange={(event) => setForm({ ...form, dateOfBirth: event.target.value })} /></label>
                   <label><span>Blood Group</span><select required name="bloodGroup" value={form.bloodGroup} onChange={(event) => setForm({ ...form, bloodGroup: event.target.value })}><option value="">Select blood group</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}</select></label>
                   <label><span>Father Name</span><input required maxLength={100} name="fatherName" value={form.fatherName} onChange={(event) => setForm({ ...form, fatherName: event.target.value })} /></label>
@@ -132,7 +168,7 @@ export default function UserDetailsPage() {
               <Detail label="Username / பயனர் பெயர்" value={user.username} />
               <Detail label="Phone Number / தொலைபேசி எண்" value={user.phoneNumber} />
               <Detail label="Location / இடம்" value={user.location} />
-              <Detail label="Date of Birth / பிறந்த தேதி" value={new Date(user.dateOfBirth).toLocaleDateString()} />
+              <Detail label="Date of Birth / பிறந்த தேதி" value={isoToDob(user.dateOfBirth)} />
               <Detail label="Blood Group / இரத்த வகை" value={user.bloodGroup} />
               <Detail label="Father Name / தந்தை பெயர்" value={user.fatherName} />
               <Detail label="Pincode / அஞ்சல் குறியீடு" value={user.pincode} />
@@ -159,13 +195,21 @@ export default function UserDetailsPage() {
             <div className="photo-grid">
               <figure>
                 <ProtectedImage path={user.aadhaarPhotoPath} ownerId={user.id} adminOnly alt="Aadhaar upload" />
-                <figcaption>Aadhaar card photo</figcaption>
+                <figcaption>Aadhaar card photo · {user.aadhaarReviewStatus || 'Needs review'}</figcaption>
+                <button type="button" onClick={() => reviewDocument('aadhaar', 'Accepted')}>Accept</button>
+                <button type="button" onClick={() => reviewDocument('aadhaar', 'Correction requested')}>Request correction</button>
               </figure>
               <figure>
                 <ProtectedImage path={user.profilePhotoPath} ownerId={user.id} adminOnly alt="Passport size upload" />
-                <figcaption>Passport Size Photo</figcaption>
+                <figcaption>Passport Size Photo · {user.profilePhotoReviewStatus || 'Needs review'}</figcaption>
+                <button type="button" onClick={cropCurrentPhoto}>Crop current photo</button>
+                <label>Crop / Replace Photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCropFile(event.target.files?.[0] || null)} /></label>
+                <button type="button" onClick={() => reviewDocument('profile', 'Accepted')}>Accept</button>
+                <button type="button" onClick={() => reviewDocument('profile', 'Correction requested')}>Request correction</button>
               </figure>
             </div>
+            {cropFile && <PhotoCropper file={cropFile} onSave={replacePhoto} onCancel={() => setCropFile(null)} />}
+            {user.documentCorrectionRequest && <div className="notice error" role="status">Correction requested: {user.documentCorrectionRequest}</div>}
 
             {card && (
               <div className="admin-id-preview">

@@ -84,7 +84,7 @@ public sealed class UsersController : ControllerBase
             PhoneNumber = request.PhoneNumber.Trim(),
             MobileVerified = _registrationOtpEnabled,
             PasswordHash = HashPassword(request.Password),
-            Location = request.Location.Trim(),
+            Location = request.Location?.Trim() ?? string.Empty,
             Name = request.Name.Trim(),
             DateOfBirth = request.DateOfBirth,
             BloodGroup = request.BloodGroup.Trim(),
@@ -94,6 +94,8 @@ public sealed class UsersController : ControllerBase
             District = request.District.Trim(),
             AadhaarPhotoPath = aadhaarPath,
             ProfilePhotoPath = profilePath,
+            ProfilePhotoReviewStatus = "Needs review",
+            AadhaarReviewStatus = "Needs review",
             ConsentAccepted = request.ConsentAccepted
         };
 
@@ -284,6 +286,36 @@ public sealed class UsersController : ControllerBase
     }
 
     [Authorize(Policy = "MemberOrAdmin")]
+    [HttpGet("{id}/document-status")]
+    public async Task<IActionResult> DocumentStatus(string id)
+    {
+        if (!User.IsInRole("Admin") && User.FindFirstValue(ClaimTypes.NameIdentifier) != id) return Forbid();
+        var member = await _userService.GetByIdAsync(id);
+        return member is null ? NotFound() : Ok(new { member.ProfilePhotoReviewStatus, member.AadhaarReviewStatus, member.DocumentCorrectionRequest });
+    }
+
+    [Authorize(Policy = "MemberOrAdmin")]
+    [HttpPost("{id}/document-correction/{kind}")]
+    [RequestSizeLimit(6 * 1024 * 1024)]
+    public async Task<IActionResult> CorrectDocument(string id, string kind, IFormFile? image)
+    {
+        if (!User.IsInRole("Admin") && User.FindFirstValue(ClaimTypes.NameIdentifier) != id) return Forbid();
+        if (kind is not ("aadhaar" or "profile")) return BadRequest();
+        var member = await _userService.GetByIdAsync(id);
+        if (member is null) return NotFound();
+        if ((kind == "aadhaar" ? member.AadhaarReviewStatus : member.ProfilePhotoReviewStatus) != "Correction requested")
+            return BadRequest(new { message = "No correction has been requested for this document." });
+        var error = await UploadValidation.ValidateAsync(image, kind == "aadhaar" ? 5 * 1024 * 1024 : 3 * 1024 * 1024, "Document");
+        if (error is not null) return BadRequest(new { message = error });
+        var (imageError, _) = await ImageSuitability.CheckAsync(image!, kind == "profile", HttpContext.RequestAborted);
+        if (imageError is not null) return BadRequest(new { message = imageError });
+        var path = await _uploads.SaveAsync(image!, kind, HttpContext.RequestAborted);
+        try { await _userService.ReplaceRequestedDocumentAsync(id, kind, path); }
+        catch { await _uploads.DeleteAsync(path); throw; }
+        return Ok(new { message = "Corrected image received for admin review." });
+    }
+
+    [Authorize(Policy = "MemberOrAdmin")]
     [HttpGet("{id}/officer-signatures/{officer}")]
     public async Task<IActionResult> GetOfficerSignature(string id, string officer)
     {
@@ -362,7 +394,6 @@ public sealed class UsersController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Name) ||
             string.IsNullOrWhiteSpace(request.PhoneNumber) ||
             string.IsNullOrWhiteSpace(request.Password) ||
-            string.IsNullOrWhiteSpace(request.Location) ||
             string.IsNullOrWhiteSpace(request.BloodGroup) ||
             string.IsNullOrWhiteSpace(request.FatherName) ||
             string.IsNullOrWhiteSpace(request.PermanentAddress) ||
@@ -404,12 +435,16 @@ public sealed class UsersController : ControllerBase
         {
             return aadhaarError;
         }
+        var (aadhaarImageError, _) = await ImageSuitability.CheckAsync(request.AadhaarPhoto!, false, HttpContext.RequestAborted);
+        if (aadhaarImageError is not null) return aadhaarImageError;
 
         var profileError = await UploadValidation.ValidateAsync(request.ProfilePhoto, 3 * 1024 * 1024, "Passport Size Photo");
         if (profileError is not null)
         {
             return profileError;
         }
+        var (profileImageError, _) = await ImageSuitability.CheckAsync(request.ProfilePhoto!, true, HttpContext.RequestAborted);
+        if (profileImageError is not null) return profileImageError;
 
         return null;
     }

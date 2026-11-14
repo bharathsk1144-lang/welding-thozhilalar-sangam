@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import HomePage from './pages/HomePage.jsx';
 import AboutPage from './pages/AboutPage.jsx';
+import ContentListPage from './pages/ContentListPage.jsx';
+import WebsiteContentPage from './pages/WebsiteContentPage.jsx';
 import RegistrationPage from './pages/RegistrationPage.jsx';
 import AdminLoginPage from './pages/AdminLoginPage.jsx';
 import AdminDashboardPage from './pages/AdminDashboardPage.jsx';
@@ -17,6 +19,8 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/about" element={<AboutPage />} />
+      <Route path="/gallery" element={<ContentListPage section="gallery" />} />
+      <Route path="/products" element={<ContentListPage section="products" />} />
       <Route path="/register" element={<RegistrationPage />} />
       <Route path="/user-login" element={<UserLoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -25,6 +29,7 @@ export default function App() {
       <Route path="/payment/:userId" element={<Navigate to="/register" replace />} />
       <Route path="/id-card/:userId" element={<IdCardPage />} />
       <Route path="/admin/login" element={<AdminLoginPage />} />
+      <Route path="/admin/website-content" element={<ProtectedRoute><WebsiteContentPage /></ProtectedRoute>} />
       <Route
         path="/admin/dashboard"
         element={

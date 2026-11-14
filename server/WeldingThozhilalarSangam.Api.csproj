@@ -8,8 +8,11 @@
   <ItemGroup>
     <Content Update="appsettings.Statistics.local.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
     <Content Include="Assets/OfficerSignatures/*.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <Content Include="Assets/about-tamil.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
     <PackageReference Include="MongoDB.Driver" Version="3.13.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.2" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.2" />
     <PackageReference Include="Snappier" Version="1.3.1" />
   </ItemGroup>
 </Project>

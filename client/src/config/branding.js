@@ -2,7 +2,7 @@
 const approvedOfficeEmail = 'weldingthozhilargalsangam@gmail.com';
 
 export const officeBearers = Object.freeze([
-  Object.freeze({ officer: 'president', name: 'A. முரளி', roleTamil: 'மாநில தலைவர்', roleEnglish: 'State President' }),
+  Object.freeze({ officer: 'president', name: 'A. முரளிதரன்', roleTamil: 'மாநில தலைவர்', roleEnglish: 'State President' }),
   Object.freeze({ officer: 'secretary', name: 'K. சங்கர்', roleTamil: 'மாநில செயலாளர்', roleEnglish: 'State Secretary' }),
   Object.freeze({ officer: 'treasurer', name: 'S. விக்னேஷ்', roleTamil: 'மாநில பொருளாளர்', roleEnglish: 'State Treasurer' })
 ]);

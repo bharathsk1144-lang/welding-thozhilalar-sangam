@@ -1,14 +1,17 @@
 import { branding } from '../config/branding.js';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell.jsx';
 import TamilDocument from '../components/TamilDocument.jsx';
 import registrationTerms from '../content/registration-terms-tamil.md?raw';
 import { api } from '../api/client.js';
 import { normalizeMobile, MOBILE_PATTERN } from '../api/mobile.js';
+import { dobToIso, formatDobInput, isoToDob } from '../api/dob.js';
+import { clearRegistrationDraft, readRegistrationDraft, saveRegistrationDraft } from '../api/registrationDraft.js';
+import { inspectImage } from '../api/imageSuitability.js';
+import PhotoCropper from '../components/PhotoCropper.jsx';
 
 const emptyForm = {
-  location: '',
   name: '',
   dateOfBirth: '',
   bloodGroup: '',
@@ -24,19 +27,37 @@ const emptyForm = {
 
 export default function RegistrationPage() {
   const navigate = useNavigate();
+  const restored = useRef(readRegistrationDraft());
+  const dobPicker = useRef(null);
+  const submitting = useRef(false);
+  const imageSelection = useRef({});
+  const draftCancelled = useRef(false);
+  const aadhaarInput = useRef(null);
+  const passportInput = useRef(null);
+  const [imageWarnings, setImageWarnings] = useState({});
+  const [imagePreviews, setImagePreviews] = useState({});
+  const activePreviews = useRef({});
+  const [cropping, setCropping] = useState(false);
+  useEffect(() => {
+    for (const [name, url] of Object.entries(activePreviews.current)) {
+      if (imagePreviews[name] !== url) URL.revokeObjectURL(url);
+    }
+    activePreviews.current = imagePreviews;
+  }, [imagePreviews]);
+  useEffect(() => () => Object.values(activePreviews.current).forEach((url) => URL.revokeObjectURL(url)), []);
   const [districts, setDistricts] = useState([]);
   const [registrationOtpRequired, setRegistrationOtpRequired] = useState(null);
   const [step, setStep] = useState('identity');
   const [identity, setIdentity] = useState({
-    name: '',
-    phoneNumber: '',
+    name: restored.current?.name || '',
+    phoneNumber: restored.current?.phoneNumber || '',
     password: '',
     confirmPassword: ''
   });
   const [otp, setOtp] = useState('');
   const [verificationToken, setVerificationToken] = useState('');
-  const [form, setForm] = useState(emptyForm);
-  const [message, setMessage] = useState('');
+  const [form, setForm] = useState(() => ({ ...emptyForm, ...restored.current?.fields }));
+  const [message, setMessage] = useState(restored.current ? 'Your registration details have been restored.' : '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [duplicateMobile, setDuplicateMobile] = useState(false);
@@ -49,6 +70,17 @@ export default function RegistrationPage() {
     })
       .catch((err) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    if (step === 'success' || draftCancelled.current) return;
+    if (!identity.name && !identity.phoneNumber && !form.permanentAddress && !form.district) return;
+    const save = () => saveRegistrationDraft(identity, form);
+    const onResume = () => { if (document.visibilityState === 'visible' && readRegistrationDraft()) save(); };
+    save();
+    window.addEventListener('pagehide', save);
+    document.addEventListener('visibilitychange', onResume);
+    return () => { window.removeEventListener('pagehide', save); document.removeEventListener('visibilitychange', onResume); };
+  }, [identity.name, identity.phoneNumber, form, step]);
 
   const selectedDistrict = useMemo(
     () => districts.find((district) => district.name === form.district),
@@ -127,11 +159,34 @@ export default function RegistrationPage() {
   }
 
   function updateForm(event) {
+    draftCancelled.current = false;
     const { name, value, type, checked, files } = event.target;
+    if (type === 'file') { chooseImage(name, files[0]); return; }
     setForm((current) => ({
       ...current,
-      [name]: type === 'checkbox' ? checked : type === 'file' ? files[0] : value
+      [name]: type === 'checkbox' ? checked : type === 'file' ? files[0] : name === 'dateOfBirth' ? formatDobInput(value) : value
     }));
+  }
+
+  async function chooseImage(name, file) {
+    draftCancelled.current = false;
+    if (!file) return;
+    const selection = Symbol(name);
+    imageSelection.current[name] = selection;
+    setForm((current) => ({ ...current, [name]: null }));
+    setImagePreviews((current) => ({ ...current, [name]: '' }));
+    setImageWarnings((current) => ({ ...current, [name]: 'Checking image locally…' }));
+    setError('');
+    const kind = name === 'profilePhoto' ? 'passport' : 'aadhaar';
+    let result;
+    try { result = await inspectImage(file, kind); }
+    catch { result = { error: 'This image could not be checked. Choose another image.' }; }
+    if (imageSelection.current[name] !== selection) return;
+    setImageWarnings((current) => ({ ...current, [name]: result.error || result.warning || '' }));
+    if (result.error) { setError(result.error); return; }
+    setForm((current) => ({ ...current, [name]: file }));
+    const preview = URL.createObjectURL(file);
+    setImagePreviews((current) => ({ ...current, [name]: preview }));
   }
 
   function validateFile(file, maxMb, label) {
@@ -145,6 +200,7 @@ export default function RegistrationPage() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (submitting.current) return;
     setError('');
     setMessage('');
 
@@ -164,6 +220,9 @@ export default function RegistrationPage() {
       return;
     }
 
+    const isoDob = dobToIso(form.dateOfBirth);
+    if (!isoDob) { setError('Enter a valid past date in DD-MM-YYYY / சரியான பிறந்த தேதியை உள்ளிடவும்.'); return; }
+
     if (!form.hasJoinedWhatsAppGroup) {
       setError('Kindly join the WhatsApp group before submitting.');
       return;
@@ -180,6 +239,13 @@ export default function RegistrationPage() {
       setError(aadhaarError || profileError);
       return;
     }
+    submitting.current = true;
+    for (const [name, kind] of [['aadhaarPhoto', 'aadhaar'], ['profilePhoto', 'passport']]) {
+      let result;
+      try { result = await inspectImage(form[name], kind); }
+      catch { result = { error: 'This image could not be checked. Choose another image.' }; }
+      if (result.error) { setError(result.error); submitting.current = false; return; }
+    }
 
     const formData = new FormData();
     if (registrationOtpRequired) formData.append('verificationToken', verificationToken);
@@ -187,12 +253,13 @@ export default function RegistrationPage() {
     formData.append('phoneNumber', identity.phoneNumber.trim());
     formData.append('password', identity.password);
     Object.entries(form).forEach(([key, value]) => {
-      if (value !== null) formData.append(key, key === 'name' ? identity.name : value);
+      if (value !== null) formData.append(key, key === 'name' ? identity.name : key === 'dateOfBirth' ? isoDob : value);
     });
 
     setLoading(true);
     try {
       const result = await api.registerUser(formData);
+      clearRegistrationDraft();
       setMessage(result.message);
       if (result.userId) {
         sessionStorage.setItem('wtsUserToken', result.token);
@@ -213,6 +280,7 @@ export default function RegistrationPage() {
         setStep('identity');
       }
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   }
@@ -262,7 +330,7 @@ export default function RegistrationPage() {
                     value={identity.name}
                     onChange={(event) => {
                       const name = event.target.value;
-                      setIdentity({ ...identity, name });
+                      draftCancelled.current = false; setIdentity({ ...identity, name });
                       setForm((current) => ({ ...current, name }));
                     }}
                     placeholder="Enter member name"
@@ -279,7 +347,7 @@ export default function RegistrationPage() {
                     onChange={(event) => {
                       setDuplicateMobile(false);
                       setError('');
-                      setIdentity({ ...identity, phoneNumber: event.target.value });
+                      draftCancelled.current = false; setIdentity({ ...identity, phoneNumber: event.target.value });
                     }}
                     placeholder="10 digit mobile number"
                     pattern={MOBILE_PATTERN}
@@ -321,7 +389,7 @@ export default function RegistrationPage() {
 
           {(step === 'otp' || step === 'form') && (
             <button type="button" className="text-button" disabled={loading} onClick={() => {
-              setVerificationToken(''); setOtp(''); setStep('identity'); setForm(emptyForm);
+              draftCancelled.current = true; setVerificationToken(''); setOtp(''); setStep('identity'); setForm(emptyForm); clearRegistrationDraft();
               setIdentity((current) => ({ ...current, password: '', confirmPassword: '' }));
               setMessage(''); setError('');
             }}>Change name or mobile · Start again</button>
@@ -378,12 +446,10 @@ export default function RegistrationPage() {
                     <small>Verified in Step 1. Start again to change this number.</small>
                   </label>
                   <label>
-                    <span>Location / இடம்</span>
-                    <input required name="location" value={form.location} onChange={updateForm} placeholder="Town or area" />
-                  </label>
-                  <label>
                     <span>Date of Birth / பிறந்த தேதி</span>
-                    <input required type="date" name="dateOfBirth" value={form.dateOfBirth} onChange={updateForm} />
+                    <input required inputMode="numeric" autoComplete="bday" name="dateOfBirth" value={form.dateOfBirth} onChange={updateForm} placeholder="DD-MM-YYYY" maxLength={10} pattern="[0-9]{2}-[0-9]{2}-[0-9]{4}" />
+                    <small>DD-MM-YYYY · நாள்-மாதம்-ஆண்டு. Type the date or use the picker.</small>
+                    <input ref={dobPicker} type="date" aria-label="Choose date of birth" value={dobToIso(form.dateOfBirth) || ''} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setForm((current) => ({ ...current, dateOfBirth: isoToDob(event.target.value) }))} />
                   </label>
                   <label>
                     <span>Blood Group / இரத்த வகை</span>
@@ -467,15 +533,25 @@ export default function RegistrationPage() {
                 <div className="form-grid two">
                   <label>
                     <span>Aadhaar card photo / ஆதார் அட்டை படம்</span>
-                    <input required type="file" name="aadhaarPhoto" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={updateForm} />
+                    <strong className="upload-warning">PLEASE UPLOAD A CLEAR AND VALID AADHAAR CARD IMAGE. OTHER PHOTOS OR UNRELATED DOCUMENTS ARE NOT ACCEPTED.</strong>
+                    <input ref={aadhaarInput} required={!form.aadhaarPhoto} type="file" name="aadhaarPhoto" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={updateForm} />
+                    {imagePreviews.aadhaarPhoto && <img className="upload-preview" src={imagePreviews.aadhaarPhoto} alt="Selected Aadhaar preview" />}
+                    {imageWarnings.aadhaarPhoto && <small role="status">{imageWarnings.aadhaarPhoto}</small>}
+                    <button type="button" className="secondary" onClick={() => aadhaarInput.current?.click()}>Choose Another Image</button>
                     <small>Upload Aadhaar card photo. Max 5 MB.</small>
                   </label>
                   <label>
                     <span>Passport Size Photo / பாஸ்போர்ட் அளவு படம்</span>
-                    <input required type="file" name="profilePhoto" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={updateForm} />
+                    <strong className="upload-warning">PLEASE UPLOAD ONLY PASSPORT SIZE PHOTO WITH A CLEAR BACKGROUND.</strong>
+                    <input ref={passportInput} required={!form.profilePhoto} type="file" name="profilePhoto" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={updateForm} />
+                    {imagePreviews.profilePhoto && <img className="upload-preview" src={imagePreviews.profilePhoto} alt="Selected passport preview" />}
+                    {imageWarnings.profilePhoto && <small role="status">{imageWarnings.profilePhoto}</small>}
+                    <button type="button" className="secondary" onClick={() => passportInput.current?.click()}>Choose Another Photo</button>
+                    {form.profilePhoto && <button type="button" className="secondary" onClick={() => setCropping(true)}>Crop Photo</button>}
                     <small>Upload clear passport size photo. Max 3 MB.</small>
                   </label>
                 </div>
+                {cropping && form.profilePhoto && <PhotoCropper file={form.profilePhoto} onSave={async (cropped) => { await chooseImage('profilePhoto', cropped); setCropping(false); }} onCancel={() => setCropping(false)} />}
               </div>
 
               <div className="form-section consent-box">

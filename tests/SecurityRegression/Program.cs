@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using SkiaSharp;
 using WeldingThozhilalarSangam.Api.Data;
 using WeldingThozhilalarSangam.Api.Models;
 using WeldingThozhilalarSangam.Api.Services;
@@ -36,6 +37,7 @@ foreach (var officer in new[] { "president", "secretary", "treasurer" })
     var blue = $"state-{officer}-signature-blue.png";
     File.Copy(Path.Combine(signatureSource, blue), Path.Combine(signatureTarget, blue));
 }
+File.Copy(Path.Combine(root, "server", "Assets", "about-tamil.md"), Path.Combine(runRoot, "Assets", "about-tamil.md"));
 var namedArgument = args.SingleOrDefault(a => a.StartsWith("--isolated-database=", StringComparison.Ordinal));
 var namedDatabase = namedArgument?["--isolated-database=".Length..];
 var retainDatabase = args.Contains("--keep-database");
@@ -259,13 +261,23 @@ try
     {
         var form = new MultipartFormDataContent();
         foreach (var field in new Dictionary<string, string> { ["phoneNumber"] = phone, ["verificationToken"] = token,
-            ["name"] = name, ["password"] = password, ["location"] = "Test", ["dateOfBirth"] = "1990-01-01",
+            ["name"] = name, ["password"] = password, ["dateOfBirth"] = "1990-01-01",
             ["bloodGroup"] = "O+", ["fatherName"] = "Test father", ["permanentAddress"] = "Isolated test address",
             ["pincode"] = "600001", ["district"] = "Chennai", ["hasJoinedWhatsAppGroup"] = "true", ["consentAccepted"] = consent ? "true" : "false" })
             form.Add(new StringContent(field.Value), field.Key);
         foreach (var field in new[] { "aadhaarPhoto", "profilePhoto" })
         {
-            var file = new ByteArrayContent(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII="));
+            var portrait = field == "profilePhoto";
+            using var bitmap = new SKBitmap(portrait ? 600 : 800, portrait ? 750 : 500);
+            using var canvas = new SKCanvas(bitmap);
+            canvas.Clear(SKColors.White);
+            using var paint = new SKPaint { Color = portrait ? SKColors.DarkBlue : SKColors.DarkRed };
+            canvas.DrawRect(portrait ? new SKRect(210, 100, 390, 320) : new SKRect(45, 45, 755, 455), paint);
+            paint.Color = SKColors.LightGray;
+            for (var line = 0; line < 12; line++) canvas.DrawRect(80, 80 + line * 30, 500, 8, paint);
+            using var picture = SKImage.FromBitmap(bitmap);
+            using var encoded = picture.Encode(SKEncodedImageFormat.Png, 100);
+            var file = new ByteArrayContent(encoded.ToArray());
             file.Headers.ContentType = new MediaTypeHeaderValue("image/png");
             form.Add(file, field, "isolated.png");
         }
@@ -353,6 +365,68 @@ try
         Check((await GetWithToken(route, memberToken)).StatusCode == HttpStatusCode.Forbidden, "member token cannot access admin route " + route);
     var admin = await Post("/api/admin/login", new { username = "test-admin", password = "IsolatedAdmin@123" }, HttpStatusCode.OK, "admin login preserved");
     var adminToken = admin["token"]!.GetValue<string>();
+    var publicContent = await Json(await http.GetAsync("/api/website-content"), HttpStatusCode.OK, "public content includes the original constitution");
+    Check(publicContent["aboutMarkdown"]!.GetValue<string>().Contains("விதி 30"), "constitution is preserved before first edit");
+    async Task<HttpResponseMessage> PutContent(string? bearer, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Put, "/api/website-content") { Content = JsonContent.Create(body) };
+        if (bearer is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        return await http.SendAsync(request);
+    }
+    var galleryUpdate = new { section = "gallery", revision = 0, items = new[] { new { id = "synthetic-gallery", title = "Synthetic gallery", description = "Test only", imagePath = "", order = 0 } } };
+    Check((await PutContent(null, galleryUpdate)).StatusCode == HttpStatusCode.Unauthorized, "public content edit denied");
+    Check((await PutContent(memberToken, galleryUpdate)).StatusCode == HttpStatusCode.Forbidden, "member content edit denied");
+    Check((await PutContent(adminToken, new { section = "gallery", revision = 0, items = new[] {
+        new { id = "synthetic-xss", title = "<script>alert(1)</script>", description = "Test only", imagePath = "", order = 0 }
+    } })).StatusCode == HttpStatusCode.BadRequest, "admin content rejects HTML markup before persistence");
+    await Json(await PutContent(adminToken, galleryUpdate), HttpStatusCode.OK, "admin content edit saved");
+    var savedContent = await Json(await http.GetAsync("/api/website-content"), HttpStatusCode.OK, "public content edit persisted");
+    Check(savedContent["gallery"]!.AsArray().Single()!["title"]!.GetValue<string>() == "Synthetic gallery" &&
+        savedContent["aboutMarkdown"]!.GetValue<string>() == publicContent["aboutMarkdown"]!.GetValue<string>(), "gallery edit preserves full About document");
+    var historyResponse = await GetWithToken("/api/website-content/history", adminToken);
+    Check(historyResponse.StatusCode == HttpStatusCode.OK, "content history available to admin");
+    var history = JsonNode.Parse(await historyResponse.Content.ReadAsStringAsync())!.AsArray();
+    Check(history.Count == 1, "content history records one edit");
+    using (var contentImage = new MultipartFormDataContent())
+    {
+        var source = await File.ReadAllBytesAsync(Path.Combine(runRoot, "wwwroot", newAccount.ProfilePhotoPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+        var bytes = new ByteArrayContent(source);
+        bytes.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        contentImage.Add(bytes, "image", "gallery.png");
+        using var upload = new HttpRequestMessage(HttpMethod.Post, "/api/website-content/images") { Content = contentImage };
+        upload.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        var imageResult = await Json(await http.SendAsync(upload), HttpStatusCode.OK, "admin uploads public gallery image into protected storage");
+        var imagePath = imageResult["imagePath"]!.GetValue<string>();
+        Check(imagePath.StartsWith("/uploads/content-"), "gallery image receives isolated content reference");
+        await Json(await PutContent(adminToken, new { section = "gallery", revision = 1, items = new[] {
+            new { id = "synthetic-gallery", title = "Updated synthetic gallery", description = "Reordered", imagePath, order = 2 }
+        } }), HttpStatusCode.OK, "admin updates gallery image and order");
+        Check((await http.GetAsync($"/api/website-content/images/{Path.GetFileName(imagePath)}")).StatusCode == HttpStatusCode.OK,
+            "public can view only referenced gallery image");
+        Check((await http.GetAsync($"/api/website-content/images/{Path.GetFileName(newAccount.AadhaarPhotoPath)}")).StatusCode == HttpStatusCode.NotFound,
+            "private Aadhaar path cannot be served as public website content");
+    }
+    var originalAbout = publicContent["aboutMarkdown"]!.GetValue<string>();
+    var editedAbout = originalAbout.Replace("# வெல்டிங் தொழிலாளர்கள் சங்கம்", "# வெல்டிங் தொழிலாளர்கள் சங்கம் – சோதனை");
+    Check(editedAbout != originalAbout, "synthetic About heading fixture matches the original constitution");
+    Check((await PutContent(adminToken, new { section = "about", revision = 2, aboutMarkdown = "Only a summary", aboutContact = "Synthetic contact" })).StatusCode == HttpStatusCode.BadRequest,
+        "admin cannot remove the constitution through content editing");
+    await Json(await PutContent(adminToken, new { section = "about", revision = 2, aboutMarkdown = editedAbout, aboutContact = "Synthetic contact" }),
+        HttpStatusCode.OK, "admin saves About contact while preserving constitution");
+    await Json(await PutContent(adminToken, new { section = "products", revision = 3, items = new[] {
+        new { id = "synthetic-product", title = "Synthetic welding product", description = "Test only", imagePath = "", order = 1 }
+    } }), HttpStatusCode.OK, "admin saves Products content");
+    var allContent = await Json(await http.GetAsync("/api/website-content"), HttpStatusCode.OK, "public About and Products are persistent");
+    Check(allContent["aboutMarkdown"]!.GetValue<string>() == editedAbout.Trim() &&
+        allContent["aboutContact"]!.GetValue<string>() == "Synthetic contact" &&
+        allContent["products"]!.AsArray().Single()!["title"]!.GetValue<string>() == "Synthetic welding product",
+        "About, Gallery and Products coexist without losing the full constitution");
+    var photoRoute = $"/api/admin/users/{newId}/profile-photo";
+    using (var unauthorizedPhoto = new MultipartFormDataContent())
+    {
+        unauthorizedPhoto.Add(new ByteArrayContent(uploadSnapshots.Values.Last()), "photo", "test.png");
+        Check((await http.PostAsync(photoRoute, unauthorizedPhoto)).StatusCode == HttpStatusCode.Unauthorized, "anonymous photo replacement denied");
+    }
     foreach (var officer in new[] { "president", "secretary", "treasurer" })
     {
         var route = $"/api/users/{newId}/officer-signatures/{officer}";
@@ -650,7 +724,7 @@ try
         var fixturePath = Path.Combine(runRoot, "admin-edit-browser-fixture.json");
         await File.WriteAllTextAsync(fixturePath, System.Text.Json.JsonSerializer.Serialize(new {
             root, runRoot, apiUrl = http.BaseAddress!.ToString().TrimEnd('/'),
-            adminToken, memberToken, userId = newId, otherId = legacy.Id
+            adminToken, memberToken, userId = newId, otherId = legacy.Id, photoPath = uploadSnapshots.Keys.Last()
         }));
         var browserStart = new ProcessStartInfo("node") { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true };
@@ -666,10 +740,73 @@ try
         var browserEdited = await users.Find(u => u.Id == newId).SingleAsync();
         Check(browserEdited.Name == "Browser Edited Synthetic Member" && browserEdited.District == "Coimbatore" &&
             browserEdited.MemberId == beforeEdit.MemberId && browserEdited.CardExpiresAt == beforeEdit.CardExpiresAt &&
-            browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == 2 &&
+            browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == 3 &&
             browserEdited.EditHistory[1].Changes[nameof(UserRegistration.Name)].NewValue == browserEdited.Name,
-            "browser save persists edited details and second audit entry without changing identity or expiry");
+            "browser save and crop persist audit entries without changing identity or expiry");
     }
+    var beforePhoto = await users.Find(u => u.Id == newId).SingleAsync();
+    using (var blankBitmap = new SKBitmap(600, 750))
+    using (var blankCanvas = new SKCanvas(blankBitmap))
+    {
+        blankCanvas.Clear(SKColors.White);
+        using var blankPicture = SKImage.FromBitmap(blankBitmap);
+        using var encodedBlank = blankPicture.Encode(SKEncodedImageFormat.Png, 100);
+        var blankBytes = encodedBlank.ToArray();
+        using var blankStream = new MemoryStream(blankBytes);
+        var blankFile = new FormFile(blankStream, 0, blankBytes.Length, "image", "blank.png") { Headers = new HeaderDictionary(), ContentType = "image/png" };
+        Check((await ImageSuitability.CheckAsync(blankFile, true, default)).Error?.Contains("blank") == true,
+            "blank passport image is rejected after decoding");
+    }
+    using (var corruptStream = new MemoryStream(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3 }))
+    {
+        var corruptFile = new FormFile(corruptStream, 0, corruptStream.Length, "image", "corrupt.png") { Headers = new HeaderDictionary(), ContentType = "image/png" };
+        Check((await ImageSuitability.CheckAsync(corruptFile, false, default)).Error?.Contains("damaged") == true,
+            "malformed document is rejected after signature check");
+    }
+    using (var replacement = new MultipartFormDataContent())
+    {
+        var bytes = await File.ReadAllBytesAsync(Path.Combine(runRoot, "wwwroot", beforePhoto.ProfilePhotoPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+        var image = new ByteArrayContent(bytes);
+        var extension = Path.GetExtension(beforePhoto.ProfilePhotoPath);
+        image.Headers.ContentType = new MediaTypeHeaderValue(extension is ".jpg" or ".jpeg" ? "image/jpeg" : extension == ".webp" ? "image/webp" : "image/png");
+        replacement.Add(image, "photo", "replacement" + extension);
+        using var request = new HttpRequestMessage(HttpMethod.Post, photoRoute) { Content = replacement };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+        await Json(await http.SendAsync(request), HttpStatusCode.OK, "admin replaces synthetic passport photo");
+    }
+    var afterPhoto = await users.Find(u => u.Id == newId).SingleAsync();
+    var cardPhoto = await Json(await GetWithToken($"/api/users/{newId}/id-card", adminToken), HttpStatusCode.OK, "card uses replacement passport photo");
+    Check(afterPhoto.ProfilePhotoPath != beforePhoto.ProfilePhotoPath && cardPhoto["profilePhotoPath"]!.GetValue<string>() == afterPhoto.ProfilePhotoPath &&
+        afterPhoto.MemberId == beforePhoto.MemberId && afterPhoto.CreatedAt == beforePhoto.CreatedAt && afterPhoto.CardExpiresAt == beforePhoto.CardExpiresAt &&
+        afterPhoto.ApprovedAt == beforePhoto.ApprovedAt && afterPhoto.EditHistory.Count == beforePhoto.EditHistory.Count + 1,
+        "photo replacement updates card and audit without changing identity, approval or validity");
+    var reviewRoute = $"/api/admin/users/{newId}/document-review";
+    Check((await PutEdit(reviewRoute, new { kind = "aadhaar", status = "Correction requested", correction = "Synthetic clearer document needed" }, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+        "member cannot set an admin document review status");
+    await Json(await PutEdit(reviewRoute, new { kind = "aadhaar", status = "Correction requested", correction = "Synthetic clearer document needed" }, adminToken),
+        HttpStatusCode.OK, "admin requests Aadhaar correction");
+    var correctionStatus = await Json(await GetWithToken($"/api/users/{newId}/document-status", memberToken), HttpStatusCode.OK,
+        "member sees requested correction status");
+    Check(correctionStatus["aadhaarReviewStatus"]!.GetValue<string>() == "Correction requested" &&
+        correctionStatus["documentCorrectionRequest"]!.GetValue<string>() == "Synthetic clearer document needed",
+        "admin correction guidance reaches the owning member");
+    Check((await GetWithToken($"/api/users/{legacy.Id}/document-status", memberToken)).StatusCode == HttpStatusCode.Forbidden,
+        "member cannot see another member's document review");
+    var beforeCorrection = await users.Find(u => u.Id == newId).SingleAsync();
+    using (var correction = new MultipartFormDataContent())
+    {
+        var image = new ByteArrayContent(uploadSnapshots.Values.First());
+        image.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        correction.Add(image, "image", "synthetic-correction.png");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/users/{newId}/document-correction/aadhaar") { Content = correction };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
+        await Json(await http.SendAsync(request), HttpStatusCode.OK, "member supplies requested Aadhaar correction");
+    }
+    var corrected = await users.Find(u => u.Id == newId).SingleAsync();
+    Check(corrected.AadhaarPhotoPath != beforeCorrection.AadhaarPhotoPath && corrected.AadhaarReviewStatus == "Needs review" &&
+        corrected.MemberId == beforeCorrection.MemberId && corrected.CardExpiresAt == beforeCorrection.CardExpiresAt &&
+        corrected.EditHistory.Count == beforeCorrection.EditHistory.Count + 1,
+        "corrected Aadhaar is private, returns to review, and preserves member identity with audit");
     var historicalDistrictId = Seed("9888888899", "WTS-ALR-0001");
     historicalDistrictId.CanonicalMobile = historicalDistrictId.PhoneNumber;
     historicalDistrictId.District = "Ariyalur";

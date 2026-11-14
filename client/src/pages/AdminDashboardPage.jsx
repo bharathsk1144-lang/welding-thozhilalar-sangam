@@ -117,6 +117,7 @@ export default function AdminDashboardPage() {
 
         {message && <div className="notice success">{message}</div>}
         {error && <div className="notice error">{error}</div>}
+        <Link to="/admin/website-content" className="button-link secondary">Website Content</Link>
 
         <div className="stats-grid">
           <div className="stat-card featured">

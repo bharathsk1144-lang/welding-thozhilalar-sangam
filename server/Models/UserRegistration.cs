@@ -26,6 +26,9 @@ public sealed class UserRegistration
     public string District { get; set; } = string.Empty;
     public string AadhaarPhotoPath { get; set; } = string.Empty;
     public string ProfilePhotoPath { get; set; } = string.Empty;
+    public string ProfilePhotoReviewStatus { get; set; } = "Needs review";
+    public string AadhaarReviewStatus { get; set; } = "Needs review";
+    public string DocumentCorrectionRequest { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string PaymentStatus { get; set; } = "Not Required";
     public string PaymentTransactionId { get; set; } = string.Empty;

@@ -5,6 +5,7 @@ import AppShell from '../components/AppShell.jsx';
 import MembershipIdCard, { downloadIdCard } from '../components/MembershipIdCard.jsx';
 import { api } from '../api/client.js';
 import { memberIdDisplay } from '../api/memberId.js';
+import { inspectImage } from '../api/imageSuitability.js';
 
 export default function MyIdCardPage() {
   const navigate = useNavigate();
@@ -15,6 +16,7 @@ export default function MyIdCardPage() {
   const [downloadError, setDownloadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [documentStatus, setDocumentStatus] = useState(null);
 
   useEffect(() => {
     const session = getUserSession();
@@ -35,7 +37,20 @@ export default function MyIdCardPage() {
       })
       .catch((err) => setError(err.message || 'Unable to load your ID card. Please try again.'))
       .finally(() => setLoading(false));
+    api.documentStatus(session.userId).then(setDocumentStatus).catch(() => {});
   }, [navigate]);
+
+  async function correctDocument(kind, file) {
+    if (!file || !card) return;
+    const check = await inspectImage(file, kind === 'profile' ? 'passport' : 'aadhaar');
+    if (check.error) { setError(check.error); return; }
+    try {
+      await api.correctDocument(card.id, kind, file);
+      setDocumentStatus(await api.documentStatus(card.id));
+      setCard(await api.idCard(card.id));
+      setMessage('Corrected image submitted for admin review.');
+    } catch (err) { setError(err.message); }
+  }
 
   async function handleDownload() {
     setDownloading(true);
@@ -66,6 +81,11 @@ export default function MyIdCardPage() {
   return (
     <AppShell>
       <section className="id-card-wrap">
+        {documentStatus && (documentStatus.profilePhotoReviewStatus === 'Correction requested' || documentStatus.aadhaarReviewStatus === 'Correction requested') && <div className="notice error">
+          <p>Document correction requested: {documentStatus.documentCorrectionRequest}</p>
+          {documentStatus.profilePhotoReviewStatus === 'Correction requested' && <label>Replace passport photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => correctDocument('profile', event.target.files?.[0])} /></label>}
+          {documentStatus.aadhaarReviewStatus === 'Correction requested' && <label>Replace Aadhaar image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => correctDocument('aadhaar', event.target.files?.[0])} /></label>}
+        </div>}
         {downloadError && <div className="notice error" role="alert">{downloadError}</div>}
         {loading && (
           <div className="panel unavailable-card">
