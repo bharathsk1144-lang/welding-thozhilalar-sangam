@@ -131,7 +131,7 @@ function assertContentPixels(rasters, geometry) {
       for (let x = Math.ceil(box.x * 2); x < Math.floor((box.x + box.width) * 2); x++) {
         const index = (y * raster.width + x) * raster.channels;
         const [r, g, b] = raster.data.subarray(index, index + 3);
-        if (box.side === 0 ? r > 180 && g > 140 && b < 230 : r > 50 && r < 165 && g < 100 && b < 120) ink++;
+        if ((r > 35 && r < 165 && g < 140 && b < 145) || (b > 90 && b < 240 && b > r * 1.3 && b > g * 1.15)) ink++;
       }
     }
     assert.ok(ink >= 20, `${box.label} remains visible in actual exported raster (${ink} pixels)`);
@@ -320,11 +320,19 @@ try {
         const identity = document.querySelector('.pass-brand__identity').getBoundingClientRect();
         const office = document.querySelector('.pass-office').getBoundingClientRect();
         const portrait = document.querySelector('.pass-portrait').getBoundingClientRect();
+        const english = document.querySelector('.pass-brand__names > span').getBoundingClientRect();
+        const tamil = document.querySelector('.pass-brand__names strong').getBoundingClientRect();
+        const front = document.querySelector('.member-pass--front').getBoundingClientRect();
+        const centered = r => Math.abs((r.left + r.right) / 2 - (front.left + front.right) / 2) < 2;
+        const address = [...document.querySelectorAll('.pass-office p > span')];
+        const light = selector => { const c = getComputedStyle(document.querySelector(selector)).backgroundColor.match(/\\d+/g).map(Number); return c[0] > 220 && c[1] > 180 && c[2] > 90; };
         return icons.every(r => r.width === 12 && r.height === 12 && Math.abs(r.x - icons[0].x) < 1) &&
-          logo.right <= names.left && Math.abs((logo.top + logo.bottom) / 2 - (names.top + names.bottom) / 2) < 2 &&
+          logo.left >= front.left && logo.right < (front.left + front.right) / 2 && centered(names) && centered(english) && centered(tamil) && getComputedStyle(document.querySelector('.pass-brand__names')).textAlign === 'center' &&
+          address.every(line => parseFloat(getComputedStyle(line.parentElement).fontSize) >= 12 && line.scrollWidth <= line.clientWidth) &&
+          light('.pass-brand') && light('.pass-back-heading') && light('.pass-return-note') &&
           identity.bottom <= office.top && office.bottom < portrait.top && getComputedStyle(document.querySelector('.pass-office')).textAlign === 'center' &&
           [...document.querySelectorAll('.pass-organization-contact dd, .pass-office p, .pass-brand__names')].every(node => node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight + 1) && document.documentElement.scrollWidth <= innerWidth;
-      })()`), `left logo/right names, centered office, aligned icons and wrapped values fit ${width}px`);
+      })()`), `centered titles, larger address, light card panels and wrapped values fit ${width}px`);
     }
     const screenshot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
     await writeFile(path.join(output, 'preview.png'), Buffer.from(screenshot.data, 'base64'));

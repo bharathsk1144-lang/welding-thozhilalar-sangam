@@ -128,16 +128,17 @@ input[readonly] { background: #eeeae0; color: #59554c; border-style: dashed; cur
 .card-preview__heading p:not(.eyebrow) { color: #6c665b; font-size: 12px; line-height: 1.8; }
 .membership-card.card-pair { background: transparent; border: 0; box-shadow: none; border-radius: 0; padding: 0; width: 100%; max-width: none; min-height: 0; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: 32px; overflow: visible; position: static; }
 .membership-card.card-pair::before { content: none; }
-.member-pass { width: 340px; min-height: 560px; flex: 0 1 340px; background: var(--card-blush); border: 1px solid #d2bdb1; border-radius: 13px; overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 10px 28px #131c2714; color: #302b22; }
-.pass-side-label { position: absolute; right: 12px; top: 10px; font-size: 6px; letter-spacing: 1px; color: #f3d88c; }
-.pass-brand { background: var(--ink); padding: 16px 14px 12px; border-bottom: 3px solid var(--gold); }
-.pass-brand__identity { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: center; }
-.pass-brand img { height: 64px; width: 64px; object-fit: contain; background: transparent; }
-.pass-brand__names { min-width: 0; text-align: left; overflow-wrap: anywhere; }
-.pass-brand__names strong { display: block; font-size: 14px; line-height: 1.8; color: #f5d14c; }
-.pass-brand__names > span { display: block; font-size: 10px; font-weight: 700; line-height: 1.6; color: #ffecc6; margin-bottom: 4px; text-transform: uppercase; }
+.member-pass { --pass-cream: #fff8e8; --pass-yellow: #ffdf68; --pass-bronze: #795219; --pass-border: #c59a49; width: 340px; min-height: 560px; flex: 0 1 340px; background: var(--pass-cream); border: 1px solid var(--pass-border); border-radius: 13px; overflow: hidden; display: flex; flex-direction: column; position: relative; box-shadow: 0 10px 28px #131c2714; color: #302b22; }
+.pass-side-label { position: absolute; right: 12px; top: 8px; font-size: 6px; letter-spacing: 1px; color: var(--pass-bronze); z-index: 1; }
+.pass-brand { background: var(--pass-yellow); padding: 16px 14px 12px; border-bottom: 3px solid var(--pass-border); }
+.pass-brand__identity { position: relative; min-height: 64px; display: flex; align-items: center; justify-content: center; }
+.pass-brand img { position: absolute; left: 0; top: 0; height: 54px; width: 54px; object-fit: contain; background: transparent; }
+.pass-brand__names { box-sizing: border-box; width: 100%; min-width: 0; padding: 0 58px; text-align: center; overflow-wrap: anywhere; }
+.pass-brand__names strong { display: block; font-size: 14px; line-height: 1.5; color: #50370f; }
+.pass-brand__names > span { display: block; font-size: 10px; font-weight: 800; line-height: 1.35; color: #50370f; margin-bottom: 4px; text-transform: uppercase; }
 .pass-office { margin-top: 10px; text-align: center; }
-.pass-office p, .pass-office > span { display: block; color: white; font-size: 10px; line-height: 1.55; margin: 0; overflow-wrap: anywhere; white-space: normal; }
+.pass-office p, .pass-office > span { display: block; color: #443011; font-size: 10px; line-height: 1.45; margin: 0; overflow-wrap: anywhere; white-space: normal; }
+.pass-office p { font-size: 12px; }
 .pass-office p > span { display: block; }
 .pass-membership { text-align: center; color: var(--antique-gold); font-size: 9px; padding: 9px 10px 0; }
 .pass-portrait { width: 108px; height: 132px; padding: 3px; border: 2px solid var(--antique-gold); border-radius: 9px; margin: 10px auto 13px; background: white; flex-shrink: 0; overflow: hidden; }
@@ -158,11 +159,11 @@ input[readonly] { background: #eeeae0; color: #59554c; border-style: dashed; cur
 .pass-signature-blank { display: block; }
 .pass-signatures strong { display: block; font-size: 7px; line-height: 1.8; font-weight: 650; }
 .pass-signatures small { display: block; font-size: 7px; line-height: 1.7; color: #715b35; }
-.pass-footer { margin-top: auto; background: var(--ink); color: white; padding: 12px 15px; text-align: center; font-size: 7px; letter-spacing: .6px; line-height: 1.8; }
+.pass-footer { margin-top: auto; background: #f6dfaa; color: #50370f; padding: 12px 15px; text-align: center; font-size: 7px; letter-spacing: .6px; line-height: 1.8; }
 .member-pass--front .pass-footer { background: transparent; color: #715b35; padding: 11px 8px 12px; margin-top: 0; font-size: 6px; }
-.pass-back-heading { background: var(--ink); color: white; padding: 20px 18px 16px; text-align: center; border-bottom: 3px solid var(--gold); }
+.pass-back-heading { background: var(--pass-yellow); color: #50370f; padding: 20px 18px 16px; text-align: center; border-bottom: 3px solid var(--pass-border); }
 .pass-back-heading strong { display: block; font-size: 16px; line-height: 1.5; text-transform: uppercase; }
-.pass-back-heading span { display: block; color: #f0d59d; font-size: 7px; letter-spacing: 1px; margin-top: 7px; }
+.pass-back-heading span { display: block; color: var(--pass-bronze); font-size: 7px; letter-spacing: 1px; margin-top: 7px; }
 .pass-back-fields { padding-top: 19px; gap: 11px; }
 .pass-back-fields .pass-field { grid-template-columns: 118px minmax(0, 1fr); }
 .pass-back-fields .pass-field dd { font-size: 10px; }
