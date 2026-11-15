@@ -109,19 +109,14 @@ public sealed class UsersController : ControllerBase
         }
         var session = _sessions.Create(user);
 
-        var memberIdView = await _userService.PresentAsync(new MemberIdView(user.MemberId));
         return Ok(new
         {
-            message = "Registration completed successfully. Your Membership ID Card is ready.",
+            message = "உங்கள் உறுப்பினர் பதிவு தற்போது நிர்வாகக் குழுவின் பரிசீலனையில் உள்ளது.",
             userId = user.Id,
-            memberId = user.MemberId,
             mobileVerified = user.MobileVerified == true,
-            displayMemberId = memberIdView.DisplayMemberId,
-            memberIdDisplayWarning = memberIdView.MemberIdDisplayWarning,
             token = session.Token,
             expiresAt = session.ExpiresAt,
-            idCardUrl = $"/id-card/{user.Id}",
-            idCardApiUrl = $"/api/users/{user.Id}/id-card"
+            approvalStatus = "Pending"
         });
     }
 
@@ -172,7 +167,7 @@ public sealed class UsersController : ControllerBase
 
         ClearFailedLogin(phoneNumber);
 
-        if (string.IsNullOrWhiteSpace(user.MemberId))
+        if (UserService.IsApproved(user) && string.IsNullOrWhiteSpace(user.MemberId))
         {
             user = await _userService.GetIdCardUserAsync(user.Id ?? string.Empty) ?? user;
         }
@@ -180,7 +175,7 @@ public sealed class UsersController : ControllerBase
         var session = _sessions.Create(user);
         return Ok(await _userService.PresentAsync(new UserLoginResponse(
             user.Id ?? string.Empty,
-            user.MemberId,
+            UserService.IsApproved(user) ? user.MemberId : string.Empty,
             user.Name,
             user.PhoneNumber,
             user.District,
@@ -281,6 +276,8 @@ public sealed class UsersController : ControllerBase
         {
             return NotFound(new { message = "User not found." });
         }
+        if (!User.IsInRole("Admin") && !UserService.IsApproved(user))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = $"ID card unavailable: {UserService.GetApprovalStatus(user)}." });
 
         return Ok(await _userService.PresentAsync(ToIdCardDto(user)));
     }
@@ -291,7 +288,8 @@ public sealed class UsersController : ControllerBase
     {
         if (!User.IsInRole("Admin") && User.FindFirstValue(ClaimTypes.NameIdentifier) != id) return Forbid();
         var member = await _userService.GetByIdAsync(id);
-        return member is null ? NotFound() : Ok(new { member.ProfilePhotoReviewStatus, member.AadhaarReviewStatus, member.DocumentCorrectionRequest });
+        return member is null ? NotFound() : Ok(new { member.ProfilePhotoReviewStatus, member.AadhaarReviewStatus,
+            member.DocumentCorrectionRequest, ApprovalStatus = UserService.GetApprovalStatus(member) });
     }
 
     [Authorize(Policy = "MemberOrAdmin")]
@@ -320,7 +318,9 @@ public sealed class UsersController : ControllerBase
     public async Task<IActionResult> GetOfficerSignature(string id, string officer)
     {
         if (!User.IsInRole("Admin") && User.FindFirstValue(ClaimTypes.NameIdentifier) != id) return Forbid();
-        if (await _userService.GetIdCardUserAsync(id) is null) return NotFound();
+        var cardUser = await _userService.GetIdCardUserAsync(id);
+        if (cardUser is null) return NotFound();
+        if (!User.IsInRole("Admin") && !UserService.IsApproved(cardUser)) return Forbid();
         var filename = officer switch
         {
             "president" => "state-president-signature-blue.png",
@@ -351,7 +351,7 @@ public sealed class UsersController : ControllerBase
         // Prefer the exact legacy value before trying the official-number form.
         if (user is null && memberId.Contains("%2F", StringComparison.OrdinalIgnoreCase))
             user = await _userService.GetByMemberIdAsync(Uri.UnescapeDataString(memberId));
-        if (user is null || string.IsNullOrWhiteSpace(user.MemberId))
+        if (user is null || string.IsNullOrWhiteSpace(user.MemberId) || !UserService.IsApproved(user))
         {
             return NotFound(new { message = "No active member found for this Member ID." });
         }
@@ -364,7 +364,7 @@ public sealed class UsersController : ControllerBase
             GetMemberStatus(user),
             GetVerificationStatus(user),
             $"{(user.CardExpiresAt ?? CardValidity.Expiry(issueDate)):dd MMM yyyy}",
-            user.ApprovedAt.HasValue ? "Verified Welding Thozhilalar Sangam member." : "Membership approval pending.")));
+            "Verified Welding Thozhilalar Sangam member.")));
     }
 
     [Authorize]
@@ -540,7 +540,8 @@ public sealed class UsersController : ControllerBase
             user.VerifiedAt,
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
             user.ConsentAccepted,
-            user.ConsentAcceptedAt);
+            user.ConsentAcceptedAt) { Posting = PostingPolicy.Display(user.Posting), ApprovalDecidedAt = user.ApprovalDecidedAt,
+                ApprovalDecidedBy = user.ApprovalDecidedBy };
     }
 
     private static IdCardDto ToIdCardDto(UserRegistration user)
@@ -564,7 +565,7 @@ public sealed class UsersController : ControllerBase
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
             user.ProfilePhotoPath,
             user.CardExpiresAt ?? CardValidity.Expiry(issueDate),
-            user.ApprovedAt.HasValue);
+            UserService.IsApproved(user)) { Posting = PostingPolicy.Display(user.Posting) };
     }
 
     private static string GetMemberStatus(UserRegistration user)
@@ -574,7 +575,7 @@ public sealed class UsersController : ControllerBase
 
     private static string GetVerificationStatus(UserRegistration user)
     {
-        return user.ApprovedAt.HasValue ? "Verified" : "Pending";
+        return UserService.IsApproved(user) ? "Verified" : UserService.GetApprovalStatus(user);
     }
 
     private sealed record LoginAttempt(int Count, DateTime? LockedUntil);

@@ -17,6 +17,7 @@ export default function MyIdCardPage() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [documentStatus, setDocumentStatus] = useState(null);
+  const [awaitingApproval, setAwaitingApproval] = useState(false);
 
   useEffect(() => {
     const session = getUserSession();
@@ -35,19 +36,23 @@ export default function MyIdCardPage() {
           memberId: result.memberId
         }));
       })
-      .catch((err) => setError(err.message || 'Unable to load your ID card. Please try again.'))
+      .catch((err) => {
+        if (err.status === 403) setAwaitingApproval(true);
+        else setError(err.message || 'Unable to load your ID card. Please try again.');
+      })
       .finally(() => setLoading(false));
     api.documentStatus(session.userId).then(setDocumentStatus).catch(() => {});
   }, [navigate]);
 
   async function correctDocument(kind, file) {
-    if (!file || !card) return;
+    const ownerId = getUserSession()?.userId;
+    if (!file || !ownerId) return;
     const check = await inspectImage(file, kind === 'profile' ? 'passport' : 'aadhaar');
     if (check.error) { setError(check.error); return; }
     try {
-      await api.correctDocument(card.id, kind, file);
-      setDocumentStatus(await api.documentStatus(card.id));
-      setCard(await api.idCard(card.id));
+      await api.correctDocument(ownerId, kind, file);
+      setDocumentStatus(await api.documentStatus(ownerId));
+      if (card) setCard(await api.idCard(ownerId));
       setMessage('Corrected image submitted for admin review.');
     } catch (err) { setError(err.message); }
   }
@@ -96,6 +101,17 @@ export default function MyIdCardPage() {
           </div>
         )}
 
+        {!loading && awaitingApproval && !card && <div className="panel unavailable-card" role="status">
+          <img src={branding.logo} alt="" className="auth-logo" />
+          <h1>{documentStatus?.approvalStatus === 'Rejected' ? 'உங்கள் பதிவு நிராகரிக்கப்பட்டது' :
+            documentStatus?.approvalStatus === 'Correction requested' ? 'உங்கள் பதிவில் திருத்தம் தேவை' : 'நிர்வாக ஒப்புதல் நிலுவையில் உள்ளது'}</h1>
+          <p>நிர்வாக ஒப்புதல் வழங்கப்பட்டவுடன், உங்கள் உறுப்பினர் அடையாள அட்டையைப் பார்க்கவும் பதிவிறக்கம் செய்யவும் முடியும்.</p>
+          <p>{documentStatus?.approvalStatus === 'Rejected' ? 'Please contact the association about your registration.' :
+            documentStatus?.approvalStatus === 'Correction requested' ? 'Please submit the requested correction for admin review.' :
+              'Please wait for admin approval before viewing or downloading your ID card.'}</p>
+          <button className="secondary" onClick={handleLogout}>Logout</button>
+        </div>}
+
         {error && (
           <div className="panel unavailable-card">
             <img src={branding.logo} alt="" className="auth-logo" />
@@ -109,7 +125,7 @@ export default function MyIdCardPage() {
           </div>
         )}
 
-        {!loading && !error && !card && (
+        {!loading && !error && !awaitingApproval && !card && (
           <div className="panel unavailable-card">
             <img src={branding.logo} alt="" className="auth-logo" />
             <p className="eyebrow">My ID Card</p>

@@ -1,6 +1,6 @@
 import { branding } from '../config/branding.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import AppShell from '../components/AppShell.jsx';
 import TamilDocument from '../components/TamilDocument.jsx';
 import registrationTerms from '../content/registration-terms-tamil.md?raw';
@@ -26,7 +26,6 @@ const emptyForm = {
 };
 
 export default function RegistrationPage() {
-  const navigate = useNavigate();
   const restored = useRef(readRegistrationDraft());
   const dobPicker = useRef(null);
   const submitting = useRef(false);
@@ -266,10 +265,8 @@ export default function RegistrationPage() {
         localStorage.setItem('wtsUser', JSON.stringify({
           userId: result.userId,
           phone: identity.phoneNumber.trim(),
-          memberId: result.memberId
+          approvalStatus: 'Pending'
         }));
-        navigate(`/id-card/${result.userId}`);
-        return;
       }
       setStep('success');
     } catch (err) {
@@ -591,9 +588,9 @@ export default function RegistrationPage() {
             <div className="done-card">
               <img src={branding.logo} alt="" className="done-logo" />
               <span className="done-icon">OK</span>
-              <h1>Registration submitted</h1>
-              <p>Thank you. Your registration has been submitted successfully.</p>
-              <small>நன்றி. உங்கள் பதிவு வெற்றிகரமாக சமர்ப்பிக்கப்பட்டது.</small>
+              <h1>உங்கள் பதிவு வெற்றிகரமாகச் சமர்ப்பிக்கப்பட்டது!</h1>
+              <p>உங்கள் உறுப்பினர் பதிவு தற்போது நிர்வாகக் குழுவின் பரிசீலனையில் உள்ளது. நிர்வாக ஒப்புதல் வழங்கப்பட்டவுடன், உங்கள் உறுப்பினர் அடையாள அட்டையைப் பார்க்கவும் பதிவிறக்கம் செய்யவும் முடியும்.</p>
+              <small>தயவுசெய்து ஒப்புதல் கிடைக்கும் வரை காத்திருக்கவும். நன்றி!</small>
               <Link to="/" className="button-link secondary">Back to Home</Link>
             </div>
           )}

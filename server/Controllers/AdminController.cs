@@ -54,7 +54,9 @@ public sealed class AdminController : ControllerBase
         var paymentPendingUsers = await _userService.CountPendingPaymentsAsync();
         var districtCounts = await _userService.CountByDistrictAsync();
 
-        return Ok(new DashboardDto(totalUsers, paymentPendingUsers, districtCounts));
+        return Ok(new DashboardDto(totalUsers, paymentPendingUsers, districtCounts) {
+            PendingApprovalCount = await _userService.CountPendingApprovalsAsync()
+        });
     }
 
     [Authorize]
@@ -98,14 +100,15 @@ public sealed class AdminController : ControllerBase
             user.MemberId,
             UserService.GetIdCardStatus(user),
             string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status,
-            user.ApprovedAt.HasValue ? "Verified" : "Pending",
+            UserService.IsApproved(user) ? "Verified" : UserService.GetApprovalStatus(user),
             user.VerifiedAt,
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
             user.ConsentAccepted,
             user.ConsentAcceptedAt,
             user.ProfilePhotoReviewStatus,
             user.AadhaarReviewStatus,
-            user.DocumentCorrectionRequest)));
+            user.DocumentCorrectionRequest) { Posting = PostingPolicy.Display(user.Posting),
+                ApprovalDecidedAt = user.ApprovalDecidedAt, ApprovalDecidedBy = user.ApprovalDecidedBy }));
     }
 
     [Authorize]
@@ -114,10 +117,30 @@ public sealed class AdminController : ControllerBase
     {
         var actor = User.Identity?.Name ?? "Admin";
         var user = await _userService.SetApprovalAsync(id, request.Approved, actor);
-        return user is null ? NotFound() : Ok(new { approved = user.ApprovedAt.HasValue, approvedAt = user.ApprovedAt });
+        return user is null ? NotFound() : Ok(new { approved = UserService.IsApproved(user), approvedAt = user.ApprovedAt });
     }
 
     public sealed record ApprovalRequest(bool Approved);
+
+    [Authorize(Roles = "Admin")]
+    [HttpGet("pending-approvals")]
+    public async Task<IActionResult> PendingApprovals() => Ok(await _userService.GetPendingApprovalsAsync());
+
+    public sealed record ApprovalDecisionRequest(string Decision, string? Note);
+
+    [Authorize(Roles = "Admin")]
+    [HttpPut("users/{id}/approval-decision")]
+    public async Task<IActionResult> DecideApproval(string id, [FromBody] ApprovalDecisionRequest? request)
+    {
+        if (!ObjectId.TryParse(id, out _) || request is null ||
+            request.Decision is not ("Approved" or "Rejected" or "Correction requested") ||
+            (request.Note?.Length ?? 0) > 400 || (request.Note?.Contains('<') ?? false) ||
+            (request.Note?.Contains('>') ?? false)) return BadRequest(new { message = "Invalid approval decision." });
+        var member = await _userService.DecideApprovalAsync(id, request.Decision,
+            User.FindFirstValue(ClaimTypes.Name) ?? "Admin", request.Note?.Trim() ?? "");
+        return member is null ? NotFound() : Ok(new { status = UserService.GetApprovalStatus(member), member.ApprovalDecidedAt,
+            member.ApprovalDecidedBy });
+    }
 
     [Authorize(Roles = "Admin")]
     [HttpPost("users/{id}/profile-photo")]
@@ -163,13 +186,15 @@ public sealed class AdminController : ControllerBase
         if (request is null) return BadRequest(new { message = "Member details are required." });
         if (request.UnexpectedFields is { Count: > 0 })
             return BadRequest(new { message = "Only member contact and registration details can be edited here." });
+        if (!PostingPolicy.TryNormalize(request.Posting, out _))
+            return BadRequest(new { message = "Posting must be a short, plain-text responsibility." });
         if (!MobileNumber.TryNormalize(request.PhoneNumber, out _))
             return BadRequest(new { message = MobileNumber.InvalidMessage });
-        if (new[] { request.Name, request.Location, request.BloodGroup, request.FatherName,
+        if (new[] { request.Name, request.BloodGroup, request.FatherName,
             request.PermanentAddress, request.Pincode, request.District }.Any(string.IsNullOrWhiteSpace))
             return BadRequest(new { message = "Required fields are missing." });
         if (request.Name.Trim().Length > 100 || request.FatherName.Trim().Length > 100 ||
-            request.Location.Trim().Length > 150 || request.PermanentAddress.Trim().Length > 500)
+            (request.Location?.Trim().Length ?? 0) > 150 || request.PermanentAddress.Trim().Length > 500)
             return BadRequest(new { message = "A text field exceeds its allowed length." });
         if (!new[] { "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-" }.Contains(request.BloodGroup.Trim()))
             return BadRequest(new { message = "Selected blood group is invalid." });
@@ -212,7 +237,7 @@ public sealed class AdminController : ControllerBase
                 Csv(user.Pincode),
                 Csv(user.CreatedAt == default ? string.Empty : user.CreatedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
                 Csv(string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status),
-                Csv(user.ApprovedAt.HasValue ? "Verified" : "Pending"),
+                Csv(UserService.GetApprovalStatus(user)),
                 Csv(item.DisplayMemberId),
                 Csv(item.MemberIdDisplayWarning ?? string.Empty)
             }));

@@ -142,6 +142,8 @@ export const api = {
   adminUpdateUser: (id, details) => request(`/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(details) }),
   adminReplacePhoto: (id, photo) => { const body = new FormData(); body.append('photo', photo); return request(`/admin/users/${encodeURIComponent(id)}/profile-photo`, { method: 'POST', body }); },
   adminReviewDocument: (id, details) => request(`/admin/users/${encodeURIComponent(id)}/document-review`, { method: 'PUT', body: JSON.stringify(details) }),
+  adminPendingApprovals: () => request('/admin/pending-approvals'),
+  decideMemberApproval: (id, decision, note = '') => request(`/admin/users/${encodeURIComponent(id)}/approval-decision`, { method: 'PUT', body: JSON.stringify({ decision, note }) }),
   setMemberApproval: (id, approved) => request(`/admin/users/${id}/approval`, { method: 'PUT', body: JSON.stringify({ approved }) }),
   pendingPayments: () => request('/payments/pending'),
   exportUsers: () => download('/admin/users/export', `WTS-Members-Export-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}.csv`),

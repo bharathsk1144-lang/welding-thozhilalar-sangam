@@ -31,6 +31,7 @@ public sealed class UserService
         user.PaymentStatus = string.IsNullOrWhiteSpace(user.PaymentStatus) ? "Not Required" : user.PaymentStatus;
         user.Status = string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status;
         user.VerificationStatus = "Pending";
+        user.Posting = PostingPolicy.Default;
         user.VerifiedAt = null;
         user.VerifiedBy = string.Empty;
         user.ApprovedAt = null;
@@ -81,7 +82,7 @@ public sealed class UserService
             u.District,
             u.MemberId,
             u.CreatedAt,
-            GetIdCardStatus(u))).ToList();
+            GetIdCardStatus(u)) { Posting = PostingPolicy.Display(u.Posting), ApprovalStatus = GetApprovalStatus(u) }).ToList();
         return await PresentManyAsync(views);
     }
 
@@ -176,7 +177,10 @@ public sealed class UserService
         Changed(nameof(current.PhoneNumber), current.PhoneNumber, phone);
         var username = current.Username == current.PhoneNumber ? phone : current.Username;
         Changed(nameof(current.Username), current.Username, username);
-        Changed(nameof(current.Location), current.Location, request.Location.Trim());
+        var location = request.Location?.Trim() ?? string.Empty;
+        Changed(nameof(current.Location), current.Location, location);
+        var posting = request.Posting is null ? PostingPolicy.Display(current.Posting) : request.Posting.Trim();
+        Changed(nameof(current.Posting), PostingPolicy.Display(current.Posting), posting);
         Changed(nameof(current.DateOfBirth), current.DateOfBirth.ToString("O"), request.DateOfBirth.ToString("O"));
         Changed(nameof(current.BloodGroup), current.BloodGroup, request.BloodGroup.Trim());
         Changed(nameof(current.FatherName), current.FatherName, request.FatherName.Trim());
@@ -186,10 +190,14 @@ public sealed class UserService
         if (changes.Count == 0) return current;
 
         // Match the prior values so a concurrent edit cannot make the audit inaccurate.
+        var postingFilter = Builders<UserRegistration>.Filter.Eq(u => u.Posting, current.Posting);
+        if (current.Posting == PostingPolicy.Default)
+            postingFilter |= Builders<UserRegistration>.Filter.Exists(u => u.Posting, false);
         var filter = Builders<UserRegistration>.Filter.Eq(u => u.Id, id) &
             Builders<UserRegistration>.Filter.Eq(u => u.Name, current.Name) &
             Builders<UserRegistration>.Filter.Eq(u => u.PhoneNumber, current.PhoneNumber) &
             Builders<UserRegistration>.Filter.Eq(u => u.Location, current.Location) &
+            postingFilter &
             Builders<UserRegistration>.Filter.Eq(u => u.DateOfBirth, current.DateOfBirth) &
             Builders<UserRegistration>.Filter.Eq(u => u.BloodGroup, current.BloodGroup) &
             Builders<UserRegistration>.Filter.Eq(u => u.FatherName, current.FatherName) &
@@ -201,7 +209,8 @@ public sealed class UserService
             .Set(u => u.PhoneNumber, phone)
             .Set(u => u.CanonicalMobile, phone)
             .Set(u => u.Username, username)
-            .Set(u => u.Location, request.Location.Trim())
+            .Set(u => u.Location, location)
+            .Set(u => u.Posting, posting)
             .Set(u => u.DateOfBirth, request.DateOfBirth)
             .Set(u => u.BloodGroup, request.BloodGroup.Trim())
             .Set(u => u.FatherName, request.FatherName.Trim())
@@ -377,19 +386,53 @@ public sealed class UserService
         return await GetByIdAsync(userId);
     }
 
-    public async Task<UserRegistration?> SetApprovalAsync(string userId, bool approved, string actor)
+    public Task<UserRegistration?> SetApprovalAsync(string userId, bool approved, string actor) =>
+        DecideApprovalAsync(userId, approved ? "Approved" : "Pending", actor);
+
+    public async Task<UserRegistration?> DecideApprovalAsync(string userId, string decision, string actor, string note = "")
     {
-        var update = approved
-            ? Builders<UserRegistration>.Update.Set(u => u.ApprovedAt, DateTime.UtcNow)
-                .Set(u => u.VerificationStatus, "Verified")
-                .Set(u => u.VerifiedAt, DateTime.UtcNow)
-                .Set(u => u.VerifiedBy, actor)
-            : Builders<UserRegistration>.Update.Unset(u => u.ApprovedAt)
-                .Set(u => u.VerificationStatus, "Pending")
-                .Unset(u => u.VerifiedAt)
-                .Set(u => u.VerifiedBy, string.Empty);
-        var result = await _context.Users.UpdateOneAsync(u => u.Id == userId, update);
-        return result.MatchedCount == 0 ? null : await GetByIdAsync(userId);
+        var current = await GetByIdAsync(userId);
+        if (current is null) return null;
+        var before = GetApprovalStatus(current);
+        if (before == decision) throw new MemberEditConflictException();
+        var now = DateTime.UtcNow;
+        var statusFilter = Builders<UserRegistration>.Filter.Eq(u => u.VerificationStatus, current.VerificationStatus);
+        if (current.VerificationStatus == "Pending")
+            statusFilter |= Builders<UserRegistration>.Filter.Exists(u => u.VerificationStatus, false);
+        var filter = Builders<UserRegistration>.Filter.Eq(u => u.Id, userId) &
+            Builders<UserRegistration>.Filter.Eq(u => u.ApprovedAt, current.ApprovedAt) &
+            statusFilter;
+        var update = Builders<UserRegistration>.Update
+            .Set(u => u.ApprovedAt, decision == "Approved" ? now : null)
+            .Set(u => u.VerificationStatus, decision == "Approved" ? "Verified" : decision)
+            .Set(u => u.VerifiedAt, decision == "Approved" ? now : null)
+            .Set(u => u.VerifiedBy, decision == "Approved" ? actor : string.Empty)
+            .Set(u => u.ApprovalDecidedAt, now)
+            .Set(u => u.ApprovalDecidedBy, actor)
+            .Set(u => u.DocumentCorrectionRequest, decision == "Correction requested" ? note : string.Empty)
+            .Set(u => u.ProfilePhotoReviewStatus, decision == "Correction requested" ? "Correction requested" : current.ProfilePhotoReviewStatus)
+            .Set(u => u.AadhaarReviewStatus, decision == "Correction requested" ? "Correction requested" : current.AadhaarReviewStatus)
+            .Push(u => u.EditHistory, new MemberEditAudit {
+                AdminId = actor, MemberId = current.MemberId, Timestamp = now,
+                Changes = new Dictionary<string, MemberEditChange> {
+                    ["ApprovalStatus"] = new() { OldValue = before, NewValue = decision }
+                }
+            });
+        if ((await _context.Users.UpdateOneAsync(filter, update)).MatchedCount == 0) throw new MemberEditConflictException();
+        return await GetByIdAsync(userId);
+    }
+
+    public async Task<long> CountPendingApprovalsAsync() => await _context.Users.CountDocumentsAsync(
+        u => u.ApprovedAt == null && u.VerificationStatus == "Pending");
+
+    public async Task<IReadOnlyList<UserListItemDto>> GetPendingApprovalsAsync()
+    {
+        var users = await _context.Users.Find(u => u.ApprovedAt == null && u.VerificationStatus == "Pending")
+            .SortByDescending(u => u.CreatedAt).ToListAsync();
+        return await PresentManyAsync(users.Select(u => new UserListItemDto(u.Id ?? "", u.Name, u.Username,
+            u.PhoneNumber, u.District, u.MemberId, u.CreatedAt, GetIdCardStatus(u)) {
+                Posting = PostingPolicy.Display(u.Posting), ApprovalStatus = GetApprovalStatus(u)
+            }).ToList());
     }
 
     public async Task<bool> PhoneNumberExistsAsync(string phoneNumber)
@@ -427,8 +470,13 @@ public sealed class UserService
 
     public static string GetIdCardStatus(UserRegistration user)
     {
-        return string.IsNullOrWhiteSpace(user.MemberId) ? "Pending" : "Ready";
+        return IsApproved(user) ? "Ready" : GetApprovalStatus(user);
     }
+
+    public static bool IsApproved(UserRegistration user) => user.ApprovedAt.HasValue || user.VerificationStatus == "Verified";
+
+    public static string GetApprovalStatus(UserRegistration user) => IsApproved(user) ? "Approved" :
+        user.VerificationStatus is "Rejected" or "Correction requested" ? user.VerificationStatus : "Pending";
 }
 
 public sealed class MemberEditConflictException : Exception

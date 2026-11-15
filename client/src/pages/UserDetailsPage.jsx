@@ -10,7 +10,8 @@ import PhotoCropper from '../components/PhotoCropper.jsx';
 import { inspectImage } from '../api/imageSuitability.js';
 import { isoToDob } from '../api/dob.js';
 
-const editableFields = ['name', 'phoneNumber', 'location', 'dateOfBirth', 'bloodGroup', 'fatherName', 'permanentAddress', 'pincode', 'district'];
+const editableFields = ['name', 'phoneNumber', 'location', 'posting', 'dateOfBirth', 'bloodGroup', 'fatherName', 'permanentAddress', 'pincode', 'district'];
+const suggestedPostings = ['MEMBER', 'ஊர் தலைவர்', 'பொதுச் செயலாளர்', 'துணைத் தலைவர்', 'பொருளாளர்', 'மாவட்ட ஒருங்கிணைப்பாளர்'];
 const editValues = (member) => Object.fromEntries(editableFields.map((field) => [field,
   field === 'dateOfBirth' ? (member[field] || '').slice(0, 10) : member[field] || ''
 ]));
@@ -86,13 +87,16 @@ export default function UserDetailsPage() {
     }
   }
 
-  async function setApproval(approved) {
+  async function setApproval(decision) {
     setError('');
     try {
-      await api.setMemberApproval(id, approved);
+      const note = decision === 'Correction requested' ? window.prompt('What should the member correct?', 'Please provide clearer documents.') : '';
+      if (note === null) return;
+      await api.decideMemberApproval(id, decision, note);
       const [updatedUser, updatedCard] = await Promise.all([api.adminUserDetails(id), api.idCard(id)]);
       setUser(updatedUser);
       setCard(updatedCard);
+      setMessage(`Member approval status: ${decision}.`);
     } catch (err) { setError(err.message || 'Unable to update member approval.'); }
   }
 
@@ -152,7 +156,9 @@ export default function UserDetailsPage() {
                 <div className="form-grid two">
                   <label><span>Name</span><input required maxLength={100} name="name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
                   <label><span>Mobile Number</span><input required name="phoneNumber" inputMode="numeric" pattern={MOBILE_PATTERN} value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} /></label>
-                  <label><span>Location / Posting (legacy, optional)</span><input maxLength={150} name="location" value={form.location || ''} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
+                  <label><span>Location (legacy, optional)</span><input maxLength={150} name="location" value={form.location || ''} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
+                  <label><span>Posting / Responsibility</span><select value={suggestedPostings.includes(form.posting) ? form.posting : 'custom'} onChange={(event) => setForm({ ...form, posting: event.target.value === 'custom' ? '' : event.target.value })}>{suggestedPostings.map((role) => <option key={role} value={role}>{role}</option>)}<option value="custom">Custom responsibility</option></select></label>
+                  {!suggestedPostings.includes(form.posting) && <label><span>Custom posting</span><input required maxLength={60} value={form.posting} onChange={(event) => setForm({ ...form, posting: event.target.value })} /></label>}
                   <label><span>Date of Birth</span><input required type="date" name="dateOfBirth" value={form.dateOfBirth} onChange={(event) => setForm({ ...form, dateOfBirth: event.target.value })} /></label>
                   <label><span>Blood Group</span><select required name="bloodGroup" value={form.bloodGroup} onChange={(event) => setForm({ ...form, bloodGroup: event.target.value })}><option value="">Select blood group</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}</select></label>
                   <label><span>Father Name</span><input required maxLength={100} name="fatherName" value={form.fatherName} onChange={(event) => setForm({ ...form, fatherName: event.target.value })} /></label>
@@ -174,7 +180,10 @@ export default function UserDetailsPage() {
               <Detail label="Pincode / அஞ்சல் குறியீடு" value={user.pincode} />
               <Detail label="ID Card Status" value={user.idCardStatus} />
               <Detail label="Status" value={user.status || 'Active Member'} />
+              <Detail label="Posting / Responsibility" value={user.posting || 'MEMBER'} />
               <Detail label="Verification Status" value={user.verificationStatus || 'Pending'} />
+              <Detail label="Approval decision by" value={user.approvalDecidedBy} />
+              <Detail label="Approval decision at" value={user.approvalDecidedAt ? new Date(user.approvalDecidedAt).toLocaleString() : ''} />
               <Detail label="Approved for VERIFIED badge" value={card?.isApproved ? 'Yes' : 'No'} />
               <Detail label="Consent Accepted" value={user.consentAccepted ? 'Yes' : 'No'} />
               <Detail label="Member ID" value={memberIdDisplay(user) || 'Awaiting assignment'} />
@@ -185,7 +194,10 @@ export default function UserDetailsPage() {
             {user.memberIdDisplayWarning && <div className="notice error" role="status">{user.memberIdDisplayWarning}</div>}
             <div className="detail-actions">
               {!editing && <button className="secondary" type="button" onClick={startEditing}>Edit</button>}
-              <button className="secondary" type="button" onClick={() => setApproval(!card?.isApproved)}>{card?.isApproved ? 'Revoke approval' : 'Approve member'}</button>
+              {!card?.isApproved && <button className="secondary" type="button" onClick={() => setApproval('Approved')}>Approve member</button>}
+              {!card?.isApproved && <button className="secondary" type="button" onClick={() => setApproval('Rejected')}>Reject</button>}
+              {!card?.isApproved && <button className="secondary" type="button" onClick={() => setApproval('Correction requested')}>Request correction</button>}
+              {card?.isApproved && <button className="secondary" type="button" onClick={() => setApproval('Rejected')}>Revoke approval</button>}
               <Link to={`/id-card/${user.id}`} className="button-link primary">View ID Card</Link>
               <button className="secondary" disabled={!card || downloading} onClick={handleDownload}>
                 {downloading ? 'Preparing Download...' : 'Download ID Card'}

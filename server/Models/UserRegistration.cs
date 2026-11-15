@@ -17,6 +17,7 @@ public sealed class UserRegistration
     [System.Text.Json.Serialization.JsonIgnore]
     public string PasswordHash { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;
+    public string Posting { get; set; } = "MEMBER";
     public string Name { get; set; } = string.Empty;
     public DateTime DateOfBirth { get; set; }
     public string BloodGroup { get; set; } = string.Empty;
@@ -42,6 +43,8 @@ public sealed class UserRegistration
     public string Status { get; set; } = "Active Member";
     public string VerificationStatus { get; set; } = "Pending";
     public DateTime? ApprovedAt { get; set; }
+    public DateTime? ApprovalDecidedAt { get; set; }
+    public string ApprovalDecidedBy { get; set; } = string.Empty;
     public DateTime? VerifiedAt { get; set; }
     public string VerifiedBy { get; set; } = string.Empty;
     public bool ConsentAccepted { get; set; }

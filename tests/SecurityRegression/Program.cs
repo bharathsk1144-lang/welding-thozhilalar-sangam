@@ -303,11 +303,18 @@ try
     await Json(await http.PostAsync("/api/users/register", Registration("9876543230", token, "Tampered name")), HttpStatusCode.BadRequest, "name-bound OTP rejects tampering before saving files");
     var registered = await Json(await http.PostAsync("/api/users/register", Registration("9876543230", token)), HttpStatusCode.OK, "TC01: new registration");
     Check(registered["mobileVerified"]!.GetValue<bool>(), "OTP registration reports a verified mobile");
+    Check(!registered.ContainsKey("memberId") && !registered.ContainsKey("displayMemberId") &&
+        !registered.ContainsKey("idCardUrl") && registered["approvalStatus"]!.GetValue<string>() == "Pending",
+        "pending registration response exposes no member ID or card URL");
     var newId = registered["userId"]!.GetValue<string>();
     var afterRegistrationStatistics = await Json(await http.GetAsync("/api/statistics"), HttpStatusCode.OK, "statistics refreshed after registration");
     Check(afterRegistrationStatistics["totalRegisteredMembers"]!.GetValue<long>() == beforeRegistrationStatistics.TotalRegisteredMembers + 1,
         "pending registration still counts as a registered member without claiming verification");
     var memberToken = registered["token"]!.GetValue<string>();
+    var pendingLogin = await Post("/api/users/login", new { phone = "9876543230", password = "NewMember@123" },
+        HttpStatusCode.OK, "pending member can sign in to check status");
+    Check(pendingLogin["memberId"]!.GetValue<string>() == "" && pendingLogin["displayMemberId"]!.GetValue<string>() == "",
+        "pending login cannot disclose member ID");
     var registeredBefore = (await users.Find(u => u.Id == newId).SingleAsync()).ToJson();
     var newAccount = await users.Find(u => u.Id == newId).SingleAsync();
     Check(newAccount.MobileVerified == true, "OTP registration stores verified mobile ownership");
@@ -315,12 +322,9 @@ try
         "new registration stores a district-scoped, immutable server ID");
     Check(newAccount.ConsentAcceptedAt.HasValue && newAccount.ConsentPolicyVersion == "2026-11-13" && !newAccount.ApprovedAt.HasValue,
         "new registration records policy version and timestamp without automatic approval");
-    var displayId = registered["displayMemberId"]!.GetValue<string>();
-    Check(displayId == newAccount.MemberId, "new district member ID is displayed without an official-number alias");
-    var publicVerification = await Json(await http.GetAsync($"/api/users/verify/{Uri.EscapeDataString(displayId)}"), HttpStatusCode.OK,
-        "new ID public verification supports encoded official separators");
-    Check(publicVerification["memberId"]!.GetValue<string>() == newAccount.MemberId && !publicVerification.ContainsKey("phoneNumber"),
-        "verification preserves the ID without exposing private card fields");
+    var displayId = newAccount.MemberId;
+    Check((await http.GetAsync($"/api/users/verify/{Uri.EscapeDataString(displayId)}")).StatusCode == HttpStatusCode.NotFound,
+        "public verification does not disclose pending member ID");
     await Json(await http.GetAsync($"/api/users/verify/{legacy.MemberId}"), HttpStatusCode.OK, "existing year-based verification remains compatible");
     var uploadSnapshots = new[] { newAccount.AadhaarPhotoPath, newAccount.ProfilePhotoPath }.ToDictionary(
         p => Path.Combine(runRoot, "wwwroot", p.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)),
@@ -352,9 +356,9 @@ try
         if (bearer != null) message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         return await http.SendAsync(message);
     }
-    var card = await Json(await GetWithToken($"/api/users/{newId}/id-card", memberToken), HttpStatusCode.OK, "TC12: registered session loads ID card");
-    Check(card["memberId"]!.GetValue<string>() == registered["memberId"]!.GetValue<string>() && card["displayMemberId"]!.GetValue<string>() == displayId &&
-        !card.ContainsKey("aadhaarPhotoPath") && !card.ContainsKey("passwordHash"), "private card fields are safe");
+    foreach (var route in new[] { $"/api/users/{newId}/id-card", $"/api/idcards/{newId}" })
+        Check((await GetWithToken(route, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+            "pending member cannot access card through either API route");
     foreach (var route in new[] { $"/api/users/{legacy.Id}/id-card", $"/api/idcards/{legacy.Id}" })
     {
         Check((await GetWithToken(route, memberToken)).StatusCode == HttpStatusCode.Forbidden, "TC15: another member card forbidden on both routes");
@@ -434,11 +438,8 @@ try
             $"anonymous {officer} signature denied");
         Check((await GetWithToken(route, login["token"]!.GetValue<string>())).StatusCode == HttpStatusCode.Forbidden,
             $"cross-member {officer} signature denied");
-        var signed = await GetWithToken(route, memberToken);
-        Check(signed.StatusCode == HttpStatusCode.OK && signed.Headers.CacheControl?.NoStore == true &&
-            (await signed.Content.ReadAsByteArrayAsync()).SequenceEqual(
-                File.ReadAllBytes(Path.Combine(signatureSource, $"state-{officer}-signature-blue.png"))),
-            $"owner {officer} signature is exact and no-store");
+        Check((await GetWithToken(route, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+            $"pending member {officer} signature denied");
         Check((await GetWithToken(route, adminToken)).StatusCode == HttpStatusCode.OK,
             $"admin {officer} signature access");
         Check((await GetWithToken($"/Assets/OfficerSignatures/state-{officer}-signature.png", null)).StatusCode == HttpStatusCode.NotFound,
@@ -446,9 +447,11 @@ try
         Check((await GetWithToken($"/Assets/OfficerSignatures/state-{officer}-signature-blue.png", null)).StatusCode == HttpStatusCode.NotFound,
             $"blue {officer} signature is not a static asset");
     }
-    var pendingCard = await Json(await GetWithToken($"/api/users/{newId}/id-card", memberToken), HttpStatusCode.OK, "pending card preview");
-    Check(pendingCard["isApproved"]!.GetValue<bool>() == false && pendingCard["verificationStatus"]!.GetValue<string>() == "Pending",
-        "registration cannot display VERIFIED badge before admin approval");
+    var pendingDashboard = await Json(await GetWithToken("/api/dashboard/summary", adminToken), HttpStatusCode.OK, "admin dashboard pending count");
+    Check(pendingDashboard["pendingApprovalCount"]!.GetValue<long>() >= 1, "new registration notifies admin exactly through pending count");
+    var pendingList = JsonNode.Parse(await (await GetWithToken("/api/admin/pending-approvals", adminToken)).Content.ReadAsStringAsync())!.AsArray();
+    Check(pendingList.Count(member => member!["id"]!.GetValue<string>() == newId) == 1,
+        "pending approval list contains registration once");
     Check((await http.PutAsJsonAsync($"/api/admin/users/{newId}/approval", new { approved = true })).StatusCode == HttpStatusCode.Unauthorized,
         "anonymous approval is denied");
     using (var approval = new HttpRequestMessage(HttpMethod.Put, $"/api/admin/users/{newId}/approval"))
@@ -458,6 +461,20 @@ try
         await Json(await http.SendAsync(approval), HttpStatusCode.OK, "admin approves member");
     }
     var approvedCard = await Json(await GetWithToken($"/api/users/{newId}/id-card", memberToken), HttpStatusCode.OK, "approved card preview");
+    Check(approvedCard["memberId"]!.GetValue<string>() == newAccount.MemberId &&
+        !approvedCard.ContainsKey("aadhaarPhotoPath") && !approvedCard.ContainsKey("passwordHash"), "approved card exposes only safe fields");
+    Check((await http.GetAsync($"/api/users/verify/{Uri.EscapeDataString(displayId)}")).StatusCode == HttpStatusCode.OK,
+        "public verification starts only after approval");
+    Check((await GetWithToken($"/api/idcards/{newId}", memberToken)).StatusCode == HttpStatusCode.OK,
+        "alternate card route starts only after approval");
+    foreach (var officer in new[] { "president", "secretary", "treasurer" })
+    {
+        var signed = await GetWithToken($"/api/users/{newId}/officer-signatures/{officer}", memberToken);
+        Check(signed.StatusCode == HttpStatusCode.OK && signed.Headers.CacheControl?.NoStore == true &&
+            (await signed.Content.ReadAsByteArrayAsync()).SequenceEqual(
+                File.ReadAllBytes(Path.Combine(signatureSource, $"state-{officer}-signature-blue.png"))),
+            $"approved owner {officer} signature is exact and no-store");
+    }
     Check(approvedCard["isApproved"]!.GetValue<bool>() && approvedCard["verificationStatus"]!.GetValue<string>() == "Verified",
         "admin approval alone enables VERIFIED badge");
     Check((await statisticsService.GetAsync(default)).TotalRegisteredMembers == beforeRegistrationStatistics.TotalRegisteredMembers + 1,
@@ -667,7 +684,7 @@ try
     // Corrections exercise a synthetic registration in this isolated database only.
     var editRoute = $"/api/admin/users/{newId}";
     var edit = new EditMemberRequest { Name = "Corrected synthetic member", PhoneNumber = "9876543260",
-        Location = "New posting", DateOfBirth = new DateTime(1991, 2, 3, 0, 0, 0, DateTimeKind.Utc),
+        Location = "Legacy location", Posting = "ஊர் தலைவர்", DateOfBirth = new DateTime(1991, 2, 3, 0, 0, 0, DateTimeKind.Utc),
         BloodGroup = "A+", FatherName = "Corrected father", PermanentAddress = "Corrected test address",
         Pincode = "600002", District = "Madurai" };
     async Task<HttpResponseMessage> PutEdit(string target, object body, string? bearer)
@@ -680,6 +697,9 @@ try
         "unauthenticated member edit rejected");
     Check((await PutEdit(editRoute, edit, memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "member token cannot edit even its own record");
+    Check((await PutEdit(editRoute, new { edit.Name, edit.PhoneNumber, edit.Location, posting = "<script>alert(1)</script>", edit.DateOfBirth,
+        edit.BloodGroup, edit.FatherName, edit.PermanentAddress, edit.Pincode, edit.District }, adminToken)).StatusCode == HttpStatusCode.BadRequest,
+        "posting rejects HTML/script input on the server");
     Check((await PutEdit($"/api/admin/users/{legacy.Id}", edit, memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "member token cannot edit another member record");
     Check((await PutEdit(editRoute, new { edit.Name, edit.PhoneNumber, edit.Location, edit.DateOfBirth,
@@ -692,11 +712,13 @@ try
     Check((await PutEdit(editRoute, edit, adminToken)).StatusCode == HttpStatusCode.Conflict,
         "duplicate mobile edit rejected");
     edit.PhoneNumber = "9876543260";
+    await users.UpdateOneAsync(u => u.Id == newId, Builders<UserRegistration>.Update.Unset(u => u.Posting));
     var beforeEdit = await users.Find(u => u.Id == newId).SingleAsync();
+    Check(beforeEdit.Posting == "MEMBER", "historical records without Posting display the MEMBER default");
     await Json(await PutEdit(editRoute, edit, adminToken), HttpStatusCode.OK, "admin saves corrected member details");
     var afterEdit = await users.Find(u => u.Id == newId).SingleAsync();
     Check(afterEdit.Name == edit.Name && afterEdit.District == edit.District && afterEdit.PhoneNumber == edit.PhoneNumber &&
-        afterEdit.CanonicalMobile == edit.PhoneNumber && afterEdit.Location == edit.Location &&
+        afterEdit.CanonicalMobile == edit.PhoneNumber && afterEdit.Location == edit.Location && afterEdit.Posting == edit.Posting &&
         afterEdit.MemberId == beforeEdit.MemberId && afterEdit.IdSchemeVersion == beforeEdit.IdSchemeVersion &&
         afterEdit.CreatedAt == beforeEdit.CreatedAt && afterEdit.CardExpiresAt == beforeEdit.CardExpiresAt &&
         afterEdit.ApprovedAt == beforeEdit.ApprovedAt && afterEdit.PasswordHash == beforeEdit.PasswordHash &&
@@ -704,27 +726,33 @@ try
         afterEdit.VerificationStatus == beforeEdit.VerificationStatus && afterEdit.ConsentAcceptedAt == beforeEdit.ConsentAcceptedAt &&
         afterEdit.ConsentPolicyVersion == beforeEdit.ConsentPolicyVersion,
         "edit updates allowed fields and preserves identity, expiry, approval, consent and documents");
-    Check(afterEdit.EditHistory.Count == 1 && afterEdit.EditHistory[0].AdminId == "test-admin" &&
-        afterEdit.EditHistory[0].MemberId == beforeEdit.MemberId &&
-        afterEdit.EditHistory[0].Changes[nameof(UserRegistration.Name)].NewValue == edit.Name &&
-        afterEdit.EditHistory[0].Timestamp > beforeEdit.CreatedAt,
+    Check(afterEdit.EditHistory.Count == beforeEdit.EditHistory.Count + 1 && afterEdit.EditHistory[^1].AdminId == "test-admin" &&
+        afterEdit.EditHistory[^1].MemberId == beforeEdit.MemberId &&
+        afterEdit.EditHistory[^1].Changes[nameof(UserRegistration.Name)].NewValue == edit.Name &&
+        afterEdit.EditHistory[^1].Changes[nameof(UserRegistration.Posting)].NewValue == edit.Posting &&
+        afterEdit.EditHistory[^1].Timestamp > beforeEdit.CreatedAt,
         "atomic audit records admin, member, changes and timestamp");
     var detailAfterEdit = await Json(await GetWithToken($"/api/users/{newId}", adminToken), HttpStatusCode.OK, "admin refreshed member view");
     var cardAfterEdit = await Json(await GetWithToken($"/api/users/{newId}/id-card", adminToken), HttpStatusCode.OK, "admin refreshed card preview");
     Check(detailAfterEdit["name"]!.GetValue<string>() == edit.Name && cardAfterEdit["name"]!.GetValue<string>() == edit.Name &&
+        detailAfterEdit["posting"]!.GetValue<string>() == edit.Posting && cardAfterEdit["posting"]!.GetValue<string>() == edit.Posting &&
         cardAfterEdit["district"]!.GetValue<string>() == edit.District &&
         cardAfterEdit["memberId"]!.GetValue<string>() == beforeEdit.MemberId &&
         cardAfterEdit["expiresAt"]!.GetValue<DateTime>() == beforeEdit.CardExpiresAt &&
         cardAfterEdit["isApproved"]!.GetValue<bool>() == beforeEdit.ApprovedAt.HasValue,
         "view and card export source reflect edits without changing ID, expiry or approval");
-    Check((await userService.GetUsersAsync("Madurai")).Any(u => u.Id == newId && u.Name == edit.Name),
-        "admin user list reflects corrected district and name");
+    Check((await userService.GetUsersAsync("Madurai")).Any(u => u.Id == newId && u.Name == edit.Name && u.Posting == edit.Posting),
+        "admin user list reflects corrected district, name and posting");
     if (args.Contains("--admin-edit-browser"))
     {
+        var browserPending = await userService.CreateAsync(new UserRegistration {
+            PhoneNumber = "9888888821", District = "Chennai", Name = "Browser Pending Synthetic Member", ConsentAccepted = true
+        });
         var fixturePath = Path.Combine(runRoot, "admin-edit-browser-fixture.json");
         await File.WriteAllTextAsync(fixturePath, System.Text.Json.JsonSerializer.Serialize(new {
             root, runRoot, apiUrl = http.BaseAddress!.ToString().TrimEnd('/'),
-            adminToken, memberToken, userId = newId, otherId = legacy.Id, photoPath = uploadSnapshots.Keys.Last()
+            adminToken, memberToken, userId = newId, otherId = legacy.Id, pendingId = browserPending.Id,
+            photoPath = uploadSnapshots.Keys.Last()
         }));
         var browserStart = new ProcessStartInfo("node") { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true };
@@ -737,11 +765,16 @@ try
         Console.Write(await browserOutput);
         Console.Error.Write(await browserError);
         Check(browser.ExitCode == 0, "browser completes Admin Users View Edit Save and updated PDF/PNG export");
+        var browserApproved = await users.Find(u => u.Id == browserPending.Id).SingleAsync();
+        Check(browserApproved.ApprovedAt.HasValue && browserApproved.ApprovalDecidedBy == "test-admin" &&
+            browserApproved.EditHistory[^1].Changes["ApprovalStatus"].NewValue == "Approved",
+            "browser dashboard approval persists actor and audit without duplicate notification");
         var browserEdited = await users.Find(u => u.Id == newId).SingleAsync();
         Check(browserEdited.Name == "Browser Edited Synthetic Member" && browserEdited.District == "Coimbatore" &&
+            browserEdited.Posting == "பொதுச் செயலாளர்" &&
             browserEdited.MemberId == beforeEdit.MemberId && browserEdited.CardExpiresAt == beforeEdit.CardExpiresAt &&
-            browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == 3 &&
-            browserEdited.EditHistory[1].Changes[nameof(UserRegistration.Name)].NewValue == browserEdited.Name,
+            browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == afterEdit.EditHistory.Count + 2 &&
+            browserEdited.EditHistory[^2].Changes[nameof(UserRegistration.Name)].NewValue == browserEdited.Name,
             "browser save and crop persist audit entries without changing identity or expiry");
     }
     var beforePhoto = await users.Find(u => u.Id == newId).SingleAsync();
@@ -807,6 +840,34 @@ try
         corrected.MemberId == beforeCorrection.MemberId && corrected.CardExpiresAt == beforeCorrection.CardExpiresAt &&
         corrected.EditHistory.Count == beforeCorrection.EditHistory.Count + 1,
         "corrected Aadhaar is private, returns to review, and preserves member identity with audit");
+    var decisionRoute = $"/api/admin/users/{newId}/approval-decision";
+    Check((await PutEdit(decisionRoute, new { decision = "Rejected" }, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+        "member cannot reject or approve registration");
+    await Json(await PutEdit(decisionRoute, new { decision = "Rejected" }, adminToken), HttpStatusCode.OK,
+        "admin rejects synthetic member");
+    var rejected = await users.Find(u => u.Id == newId).SingleAsync();
+    Check(rejected.ApprovalDecidedBy == "test-admin" && rejected.ApprovalDecidedAt.HasValue &&
+        UserService.GetApprovalStatus(rejected) == "Rejected" && rejected.EditHistory[^1].Changes["ApprovalStatus"].NewValue == "Rejected",
+        "rejection records actor, time and audit");
+    foreach (var route in new[] { $"/api/users/{newId}/id-card", $"/api/idcards/{newId}" })
+        Check((await GetWithToken(route, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+            "rejected member cannot access card");
+    await Json(await PutEdit(decisionRoute, new { decision = "Correction requested", note = "Synthetic clearer document needed" }, adminToken),
+        HttpStatusCode.OK, "admin requests member correction");
+    var correctionDecision = await users.Find(u => u.Id == newId).SingleAsync();
+    Check(correctionDecision.VerificationStatus == "Correction requested" && correctionDecision.DocumentCorrectionRequest.Length > 0 &&
+        correctionDecision.ProfilePhotoReviewStatus == "Correction requested" && correctionDecision.AadhaarReviewStatus == "Correction requested",
+        "correction decision reaches member document workflow");
+    Check((await GetWithToken($"/api/users/{newId}/id-card", memberToken)).StatusCode == HttpStatusCode.Forbidden,
+        "correction-requested member cannot access card");
+    var parallelApprovals = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => PutEdit(decisionRoute, new { decision = "Approved" }, adminToken)));
+    Check(parallelApprovals.Count(response => response.StatusCode == HttpStatusCode.OK) == 1 &&
+        parallelApprovals.Count(response => response.StatusCode == HttpStatusCode.Conflict) == 1,
+        "concurrent approvals allow exactly one decision and audit");
+    Check((await PutEdit(decisionRoute, new { decision = "Approved" }, adminToken)).StatusCode == HttpStatusCode.Conflict,
+        "duplicate approval cannot be recorded twice");
+    Check((await GetWithToken($"/api/users/{newId}/id-card", memberToken)).StatusCode == HttpStatusCode.OK,
+        "member regains card access after approval");
     var historicalDistrictId = Seed("9888888899", "WTS-ALR-0001");
     historicalDistrictId.CanonicalMobile = historicalDistrictId.PhoneNumber;
     historicalDistrictId.District = "Ariyalur";

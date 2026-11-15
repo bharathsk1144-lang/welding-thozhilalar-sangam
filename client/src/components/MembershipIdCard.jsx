@@ -42,7 +42,7 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
         <div className="pass-portrait"><ProtectedImage path={card.profilePhotoPath} ownerId={card.id} alt="Member passport size photo" />{approved && <img className="pass-verified-badge" src="/images/verified-sticker.png" alt="Verified by the Sangam" width="34" height="34" loading="eager" decoding="sync" />}</div>
         <dl className="pass-front-fields">
           <Field label="பெயர் / Name" value={card.name} className="pass-name" />
-          <Field label="POSTING" value="Member / உறுப்பினர்" />
+          <Field label="POSTING" value={card.posting || 'MEMBER'} />
           <Field label="மாவட்டம் / District" value={card.district} />
           <Field label="உறுப்பினர் எண் / Member ID" value={text(displayId, 'Awaiting assignment')} className="pass-id" />
         </dl>

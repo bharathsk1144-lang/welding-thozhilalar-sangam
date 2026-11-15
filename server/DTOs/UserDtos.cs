@@ -27,6 +27,7 @@ public sealed class RegisterUserRequest
 
 public sealed class EditMemberRequest
 {
+    public string? Posting { get; set; }
     public string Name { get; set; } = string.Empty;
     public string PhoneNumber { get; set; } = string.Empty;
     public string Location { get; set; } = string.Empty;
@@ -50,6 +51,8 @@ public sealed record UserListItemDto(
     DateTime CreatedAt,
     string IdCardStatus) : IMemberIdView
 {
+    public string Posting { get; set; } = "MEMBER";
+    public string ApprovalStatus { get; set; } = "Pending";
     public string DisplayMemberId { get; set; } = MemberId;
     public string? MemberIdDisplayWarning { get; set; }
 }
@@ -87,6 +90,9 @@ public sealed record UserDetailsDto(
     string AadhaarReviewStatus = "Needs review",
     string DocumentCorrectionRequest = "") : IMemberIdView
 {
+    public string Posting { get; set; } = "MEMBER";
+    public DateTime? ApprovalDecidedAt { get; set; }
+    public string ApprovalDecidedBy { get; set; } = string.Empty;
     public string DisplayMemberId { get; set; } = MemberId;
     public string? MemberIdDisplayWarning { get; set; }
 }
@@ -182,6 +188,7 @@ public sealed record IdCardDto(
     DateTime? ExpiresAt = null,
     bool IsApproved = false) : IMemberIdView
 {
+    public string Posting { get; set; } = "MEMBER";
     public string DisplayMemberId { get; set; } = MemberId;
     public string? MemberIdDisplayWarning { get; set; }
 }

@@ -23,6 +23,8 @@ public sealed class DashboardController : ControllerBase
         var totalUsers = await _userService.CountAsync();
         var paymentPendingUsers = await _userService.CountPendingPaymentsAsync();
         var districtCounts = await _userService.CountByDistrictAsync();
-        return Ok(new DashboardDto(totalUsers, paymentPendingUsers, districtCounts));
+        return Ok(new DashboardDto(totalUsers, paymentPendingUsers, districtCounts) {
+            PendingApprovalCount = await _userService.CountPendingApprovalsAsync()
+        });
     }
 }

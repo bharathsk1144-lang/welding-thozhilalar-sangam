@@ -27,6 +27,8 @@ public sealed class IdCardsController : ControllerBase
         {
             return NotFound(new { message = "User not found." });
         }
+        if (!User.IsInRole("Admin") && !UserService.IsApproved(user))
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = $"ID card unavailable: {UserService.GetApprovalStatus(user)}." });
 
         var issueDate = user.CreatedAt;
         var expiresAt = user.CardExpiresAt ?? CardValidity.Expiry(issueDate);
@@ -43,11 +45,11 @@ public sealed class IdCardsController : ControllerBase
             issueDate,
             $"{expiresAt:dd MMM yyyy}",
             string.IsNullOrWhiteSpace(user.Status) ? "Active Member" : user.Status,
-            user.ApprovedAt.HasValue ? "Verified" : "Pending",
+            UserService.IsApproved(user) ? "Verified" : UserService.GetApprovalStatus(user),
             user.VerifiedAt,
             string.IsNullOrWhiteSpace(user.VerifiedBy) ? "System" : user.VerifiedBy,
             user.ProfilePhotoPath,
             expiresAt,
-            user.ApprovedAt.HasValue)));
+            UserService.IsApproved(user)) { Posting = PostingPolicy.Display(user.Posting) }));
     }
 }
