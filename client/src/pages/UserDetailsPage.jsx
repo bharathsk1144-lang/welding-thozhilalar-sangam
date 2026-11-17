@@ -172,6 +172,7 @@ export default function UserDetailsPage() {
                   <label><span>Mobile Number</span><input required name="phoneNumber" inputMode="numeric" pattern={MOBILE_PATTERN} value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} /></label>
                   <label><span>Location (legacy, optional)</span><input maxLength={150} name="location" value={form.location || ''} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
                   <label><span>Posting / Responsibility</span><input required name="posting" maxLength={60} value={form.posting} onChange={(event) => setForm({ ...form, posting: event.target.value })} /></label>
+                  <label><span>Aadhaar Number (masked, read only)</span><input readOnly value={user.aadhaarNumberMasked || (user.aadhaarPhotoPath ? 'Legacy image on file' : 'Not recorded for this member')} autoComplete="off" /></label>
                   <label><span>Date of Birth</span><input required type="date" name="dateOfBirth" value={form.dateOfBirth} onChange={(event) => setForm({ ...form, dateOfBirth: event.target.value })} /></label>
                   <label><span>Blood Group</span><select required name="bloodGroup" value={form.bloodGroup} onChange={(event) => setForm({ ...form, bloodGroup: event.target.value })}><option value="">Select blood group</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}</select></label>
                   <label><span>Father Name</span><input required maxLength={100} name="fatherName" value={form.fatherName} onChange={(event) => setForm({ ...form, fatherName: event.target.value })} /></label>
@@ -194,7 +195,7 @@ export default function UserDetailsPage() {
               <Detail label="ID Card Status" value={user.idCardStatus} />
               <Detail label="Status" value={user.status || 'Active Member'} />
               <Detail label="Posting / Responsibility" value={user.posting || 'MEMBER'} />
-              <Detail label="Aadhaar Number" value={user.aadhaarNumberMasked || (user.aadhaarPhotoPath ? 'Legacy image on file' : 'Not recorded')} />
+              <Detail label="Aadhaar Number (masked)" value={user.aadhaarNumberMasked || (user.aadhaarPhotoPath ? 'Legacy image on file' : 'Not recorded for this member')} />
               <Detail label="Verification Status" value={user.verificationStatus || 'Pending'} />
               <Detail label="Approval decision by" value={user.approvalDecidedBy} />
               <Detail label="Approval decision at" value={user.approvalDecidedAt ? new Date(user.approvalDecidedAt).toLocaleString() : ''} />
@@ -221,9 +222,9 @@ export default function UserDetailsPage() {
             <div className="photo-grid">
               <figure>
                 {user.aadhaarPhotoPath && <ProtectedImage path={user.aadhaarPhotoPath} ownerId={user.id} adminOnly alt="Legacy Aadhaar upload" />}
-                <figcaption>{user.aadhaarPhotoPath ? `Legacy Aadhaar card photo · ${user.aadhaarReviewStatus || 'Needs review'}` : 'Aadhaar number on file · format and checksum validated'}</figcaption>
-                {user.aadhaarPhotoPath && <button type="button" onClick={() => reviewDocument('aadhaar', 'Accepted')}>Accept</button>}
-                {user.aadhaarPhotoPath && <button type="button" onClick={() => reviewDocument('aadhaar', 'Correction requested')}>Request correction</button>}
+                <figcaption>{user.aadhaarPhotoPath ? `Legacy Aadhaar card photo · ${user.aadhaarReviewStatus || 'Needs review'}` : user.aadhaarNumberMasked ? 'Aadhaar number on file · format and checksum validated' : 'No Aadhaar number or image recorded'}</figcaption>
+                {user.aadhaarPhotoPath && !user.aadhaarNumberMasked && <button type="button" onClick={() => reviewDocument('aadhaar', 'Accepted')}>Accept</button>}
+                {user.aadhaarPhotoPath && !user.aadhaarNumberMasked && <button type="button" onClick={() => reviewDocument('aadhaar', 'Correction requested')}>Request correction</button>}
               </figure>
               <figure>
                 <ProtectedImage path={user.profilePhotoPath} ownerId={user.id} adminOnly alt="Passport size upload" />

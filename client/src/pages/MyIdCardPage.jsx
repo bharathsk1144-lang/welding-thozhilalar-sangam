@@ -86,10 +86,10 @@ export default function MyIdCardPage() {
   return (
     <AppShell>
       <section className="id-card-wrap">
-        {documentStatus && (documentStatus.profilePhotoReviewStatus === 'Correction requested' || documentStatus.aadhaarReviewStatus === 'Correction requested') && <div className="notice error">
+        {documentStatus && (documentStatus.profilePhotoReviewStatus === 'Correction requested' || (documentStatus.hasLegacyAadhaarImage && documentStatus.aadhaarReviewStatus === 'Correction requested')) && <div className="notice error">
           <p>Document correction requested: {documentStatus.documentCorrectionRequest}</p>
           {documentStatus.profilePhotoReviewStatus === 'Correction requested' && <label>Replace passport photo<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => correctDocument('profile', event.target.files?.[0])} /></label>}
-          {documentStatus.aadhaarReviewStatus === 'Correction requested' && <label>Replace Aadhaar image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => correctDocument('aadhaar', event.target.files?.[0])} /></label>}
+          {documentStatus.hasLegacyAadhaarImage && documentStatus.aadhaarReviewStatus === 'Correction requested' && <label>Replace historical Aadhaar image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => correctDocument('aadhaar', event.target.files?.[0])} /></label>}
         </div>}
         {downloadError && <div className="notice error" role="alert">{downloadError}</div>}
         {loading && (

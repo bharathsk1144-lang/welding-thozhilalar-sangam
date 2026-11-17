@@ -411,7 +411,8 @@ public sealed class UserService
             .Set(u => u.ApprovalDecidedBy, actor)
             .Set(u => u.DocumentCorrectionRequest, decision == "Correction requested" ? note : string.Empty)
             .Set(u => u.ProfilePhotoReviewStatus, decision == "Correction requested" ? "Correction requested" : current.ProfilePhotoReviewStatus)
-            .Set(u => u.AadhaarReviewStatus, decision == "Correction requested" ? "Correction requested" : current.AadhaarReviewStatus)
+            .Set(u => u.AadhaarReviewStatus, decision == "Correction requested" && string.IsNullOrEmpty(current.AadhaarNumberCiphertext) && !string.IsNullOrEmpty(current.AadhaarPhotoPath)
+                ? "Correction requested" : current.AadhaarReviewStatus)
             .Push(u => u.EditHistory, new MemberEditAudit {
                 AdminId = actor, MemberId = current.MemberId, Timestamp = now,
                 Changes = new Dictionary<string, MemberEditChange> {

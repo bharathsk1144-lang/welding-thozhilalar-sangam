@@ -289,6 +289,7 @@ public sealed class UsersController : ControllerBase
         if (!User.IsInRole("Admin") && User.FindFirstValue(ClaimTypes.NameIdentifier) != id) return Forbid();
         var member = await _userService.GetByIdAsync(id);
         return member is null ? NotFound() : Ok(new { member.ProfilePhotoReviewStatus, member.AadhaarReviewStatus,
+            HasLegacyAadhaarImage = string.IsNullOrEmpty(member.AadhaarNumberCiphertext) && !string.IsNullOrEmpty(member.AadhaarPhotoPath),
             member.DocumentCorrectionRequest, ApprovalStatus = UserService.GetApprovalStatus(member) });
     }
 
@@ -301,6 +302,8 @@ public sealed class UsersController : ControllerBase
         if (kind is not ("aadhaar" or "profile")) return BadRequest();
         var member = await _userService.GetByIdAsync(id);
         if (member is null) return NotFound();
+        if (kind == "aadhaar" && (!string.IsNullOrEmpty(member.AadhaarNumberCiphertext) || string.IsNullOrEmpty(member.AadhaarPhotoPath)))
+            return BadRequest(new { message = "Aadhaar image correction is available only for historical image records." });
         if ((kind == "aadhaar" ? member.AadhaarReviewStatus : member.ProfilePhotoReviewStatus) != "Correction requested")
             return BadRequest(new { message = "No correction has been requested for this document." });
         var error = await UploadValidation.ValidateAsync(image, kind == "aadhaar" ? 5 * 1024 * 1024 : 3 * 1024 * 1024, "Document");

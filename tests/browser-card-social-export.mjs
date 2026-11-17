@@ -240,7 +240,8 @@ try {
             [1, '.pass-address dd', 'Member house address'],
             [1, '.pass-organization-contact dl > div:nth-child(2) dd', 'Tamil Facebook name'],
             [1, '.pass-organization-contact dl > div:nth-child(3) dd', 'YouTube URL'],
-            [1, '.pass-organization-contact dl > div:nth-child(4) dd', 'Website URL']
+            [1, '.pass-organization-contact dl > div:nth-child(4) dd', 'Website URL'],
+            [1, '.pass-thirukkural p', 'Thirukkural 619 Tamil verse']
           ].map(([side, selector, label]) => {
             const parent = document.querySelector('.card-pair--export [data-card-side=' + (side ? 'back' : 'front') + ']');
             const p = parent.getBoundingClientRect(), r = parent.querySelector(selector).getBoundingClientRect();
@@ -293,6 +294,16 @@ try {
     if (!scenario.approved && scenario.president) assert.ok(await evaluate(`!document.querySelector('.membership-card').textContent.includes(${JSON.stringify(scenario.president)})`), 'unapproved President address is not rendered');
     assert.equal(await evaluate("document.querySelector('.member-pass--front .pass-id dd').textContent"), card.displayMemberId);
     assert.equal(await evaluate("document.querySelector('.member-pass--back').textContent.includes('Member ID')"), false);
+    assert.ok(await evaluate(`(() => {
+      const back = document.querySelector('.member-pass--back');
+      const verse = back.querySelector('.pass-thirukkural');
+      const qr = back.querySelector('.pass-website-qr');
+      const footer = back.querySelector('.pass-return-note');
+      return verse?.textContent === 'திருக்குறள் எண்: 619தெய்வத்தான் ஆகா தெனினும் முயற்சிதன்மெய்வருத்தக் கூலி தரும்.அதிகாரம் 62' &&
+        Number(getComputedStyle(verse.querySelector('p')).fontWeight) >= 700 &&
+        verse.getBoundingClientRect().top > qr.getBoundingClientRect().bottom &&
+        verse.getBoundingClientRect().bottom <= footer.getBoundingClientRect().top;
+    })()`), 'bold Thirukkural 619 fits below the scannable QR and above the footer');
     if (mode === 'corrected-member') {
       assert.equal(await evaluate("document.querySelector('.pass-name dd').textContent"), card.name);
       assert.equal(await evaluate("document.querySelector('.pass-front-fields .pass-field:nth-child(3) dd').textContent"), card.district);
@@ -383,6 +394,14 @@ try {
         document.querySelector('.form-panel form').requestSubmit();
       })()`);
       await until(() => evaluate("document.querySelector('.registration-form') !== null"), 'registration details without OTP');
+      assert.ok(await evaluate(`(() => {
+        const address = document.querySelector('textarea[name=permanentAddress]');
+        const pin = document.querySelector('input[name=pincode]');
+        const aadhaar = document.querySelector('input[name=aadhaarNumber]');
+        return address?.closest('label')?.textContent.includes('முழு முகவரி மற்றும் அஞ்சல் குறியீடு / Full Address with Pincode') &&
+          address.placeholder.includes('வீட்டு எண்') && pin?.required && pin.maxLength === 6 &&
+          aadhaar?.required && !document.querySelector('input[name=aadhaarPhoto], input[type=file][name*=aadhaar i]');
+      })()`), 'full address and required pincode/Aadhaar number without Aadhaar photo upload');
       assert.ok(await evaluate("!document.querySelector('input[autocomplete=one-time-code]')"));
       assert.ok(await evaluate(`(() => {
         const box = document.querySelector('input[name="consentAccepted"]');

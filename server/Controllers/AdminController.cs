@@ -175,6 +175,10 @@ public sealed class AdminController : ControllerBase
             request.Status is not ("Needs review" or "Accepted" or "Correction requested") ||
             (request.Correction?.Length ?? 0) > 400)
             return BadRequest(new { message = "Invalid document review." });
+        var current = await _userService.GetByIdAsync(id);
+        if (current is null) return NotFound();
+        if (request.Kind == "aadhaar" && (!string.IsNullOrEmpty(current.AadhaarNumberCiphertext) || string.IsNullOrEmpty(current.AadhaarPhotoPath)))
+            return BadRequest(new { message = "Aadhaar image review is available only for historical image records." });
         var member = await _userService.SetDocumentReviewAsync(id, request.Kind, request.Status,
             request.Status == "Correction requested" ? request.Correction?.Trim() ?? "Please upload a clearer image." : string.Empty,
             User.FindFirstValue(ClaimTypes.Name) ?? "Admin");

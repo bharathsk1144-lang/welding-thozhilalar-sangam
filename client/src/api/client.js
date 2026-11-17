@@ -138,7 +138,7 @@ export const api = {
   dashboard: () => request('/dashboard/summary'),
   adminUsers: (district) =>
     district ? request(`/users/by-district/${encodeURIComponent(district)}`) : request('/users'),
-  adminUserDetails: (id) => request(`/users/${id}`),
+  adminUserDetails: (id) => request(`/admin/users/${encodeURIComponent(id)}`),
   adminUpdateUser: (id, details) => request(`/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(details) }),
   adminReplacePhoto: (id, photo) => { const body = new FormData(); body.append('photo', photo); return request(`/admin/users/${encodeURIComponent(id)}/profile-photo`, { method: 'POST', body }); },
   adminReviewDocument: (id, details) => request(`/admin/users/${encodeURIComponent(id)}/document-review`, { method: 'PUT', body: JSON.stringify(details) }),

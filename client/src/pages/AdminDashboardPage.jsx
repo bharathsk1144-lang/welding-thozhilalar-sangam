@@ -66,16 +66,18 @@ export default function AdminDashboardPage() {
     setPreview(null);
   }
 
-  async function approvePreview() {
-    if (!preview?.card || preview.card.isApproved || preview.busy) return;
+  async function decidePreview(decision) {
+    if (!preview?.card || preview.busy || (decision === 'Approved' && preview.card.isApproved)) return;
     const id = preview.id;
+    const note = decision === 'Correction requested' ? window.prompt('What should the member correct?', 'Please provide the corrected details or passport photo.') : '';
+    if (note === null) return;
     setPreview((current) => ({ ...current, busy: true, error: '' }));
     try {
-      await api.decideMemberApproval(id, 'Approved');
+      await api.decideMemberApproval(id, decision, note);
       const card = await api.idCard(id);
       setPreview((current) => current?.id === id ? { id, card, loading: false, busy: false, error: '' } : current);
       await loadData();
-      setMessage('Member approved. The ID card preview and user list are updated.');
+      setMessage(`Member approval status: ${decision}. The ID card preview and user list are updated.`);
     } catch (err) {
       setPreview((current) => current?.id === id ? { ...current, busy: false, error: err.message } : current);
     }
@@ -224,7 +226,7 @@ export default function AdminDashboardPage() {
         <section className="panel data-panel" id="pending-approvals">
           <div className="section-title"><div><p className="eyebrow">Admin notification</p><h2>Pending Registrations ({dashboard.pendingApprovalCount || 0})</h2></div></div>
           <div className="table-wrap"><table><thead><tr><th>Name</th><th>District</th><th>Submitted</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-            {pendingApprovals.map((member) => <tr key={member.id}><td>{member.name}</td><td>{member.district}</td><td>{new Date(member.createdAt).toLocaleDateString()}</td><td>{member.approvalStatus}</td><td><Link to={`/admin/users/${member.id}`}>View</Link>{' '}<button type="button" onClick={() => decideApproval(member.id, 'Approved')}>Approve</button>{' '}<button type="button" onClick={() => decideApproval(member.id, 'Rejected')}>Reject</button>{' '}<button type="button" onClick={() => decideApproval(member.id, 'Correction requested')}>Request correction</button></td></tr>)}
+            {pendingApprovals.map((member) => <tr key={member.id} data-member-record-id={member.id}><td>{member.name}</td><td>{member.district}</td><td>{new Date(member.createdAt).toLocaleDateString()}</td><td>{member.approvalStatus}</td><td><button type="button" onClick={() => openPreview(member.id)}>Preview ID Card</button>{' '}<button type="button" onClick={() => decideApproval(member.id, 'Approved')}>Approve</button>{' '}<button type="button" onClick={() => decideApproval(member.id, 'Rejected')}>Reject</button>{' '}<button type="button" onClick={() => decideApproval(member.id, 'Correction requested')}>Request correction</button></td></tr>)}
             {pendingApprovals.length === 0 && <tr><td colSpan="5" className="empty">No pending registrations.</td></tr>}
           </tbody></table></div>
         </section>
@@ -291,7 +293,9 @@ export default function AdminDashboardPage() {
               <div><p className="eyebrow">Admin preview</p><h2>ID Card · Front &amp; Back</h2></div>
               <div className="quick-card-actions">
                 {preview.card && <button type="button" className="secondary" onClick={() => navigate(`/admin/users/${preview.id}`, { state: { startEditing: true, quickPreviewReturn: true } })}>Edit</button>}
-                {preview.card && !preview.card.isApproved && <button type="button" className="primary" disabled={preview.busy} onClick={approvePreview}>{preview.busy ? 'Approving…' : 'Approve'}</button>}
+                {preview.card && !preview.card.isApproved && <button type="button" className="primary" disabled={preview.busy} onClick={() => decidePreview('Approved')}>Approve</button>}
+                {preview.card && preview.card.verificationStatus !== 'Rejected' && <button type="button" className="secondary" disabled={preview.busy} onClick={() => decidePreview('Rejected')}>Reject</button>}
+                {preview.card && !preview.card.isApproved && preview.card.verificationStatus !== 'Correction requested' && <button type="button" className="secondary" disabled={preview.busy} onClick={() => decidePreview('Correction requested')}>Request Correction</button>}
                 <button ref={closeButton} type="button" className="secondary" onClick={closePreview}>Close</button>
               </div>
             </div>

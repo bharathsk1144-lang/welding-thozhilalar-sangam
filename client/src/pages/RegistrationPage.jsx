@@ -469,14 +469,15 @@ export default function RegistrationPage() {
                 <div className="section-kicker">Address and district</div>
                 <div className="form-grid two">
                   <label className="wide">
-                    <span>Permanent Address / நிரந்தர முகவரி</span>
+                    <span>முழு முகவரி மற்றும் அஞ்சல் குறியீடு / Full Address with Pincode</span>
                     <textarea
                       required
                       name="permanentAddress"
                       value={form.permanentAddress}
                       onChange={updateForm}
-                      placeholder="Door number, street, village or town"
+                      placeholder="வீட்டு எண், தெரு, ஊர் / Door number, street, village or town"
                     />
+                    <small>முழு வீட்டு முகவரியை எழுதவும். கீழே உள்ள தனி புலத்தில் 6 இலக்க அஞ்சல் குறியீட்டை உள்ளிடவும். / Enter your full residential address and its 6-digit pincode in the separate field below.</small>
                   </label>
                   <label>
                     <span>Pincode / அஞ்சல் குறியீடு</span>
@@ -484,6 +485,7 @@ export default function RegistrationPage() {
                       required
                       inputMode="numeric"
                       name="pincode"
+                      maxLength={6}
                       value={form.pincode}
                       onChange={updateForm}
                       pattern="[0-9]{6}"

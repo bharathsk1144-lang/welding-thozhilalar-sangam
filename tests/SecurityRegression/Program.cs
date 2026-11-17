@@ -552,7 +552,8 @@ try
     Check(afterReset.MemberId == legacy.MemberId && afterReset.PasswordHash != legacy.PasswordHash &&
         afterReset.AadhaarPhotoPath == legacy.AadhaarPhotoPath && afterReset.ProfilePhotoPath == legacy.ProfilePhotoPath &&
         approvedSnapshot == (await users.Find(u => u.Id == newId).SingleAsync()).ToJson(), "TC10/11/17: reset preserves Member ID/documents and other account");
-    await Post("/api/users/login", new { phone = "9876543210", password = "ResetSecure@123" }, HttpStatusCode.OK, "reset password authenticates");
+    var legacyLogin = await Post("/api/users/login", new { phone = "9876543210", password = "ResetSecure@123" }, HttpStatusCode.OK, "reset password authenticates");
+    var legacyToken = legacyLogin["token"]!.GetValue<string>();
 
     // Exercise the real limiter instead of disabling it for tests. Wait for the next window once.
     Console.WriteLine("Waiting 61 seconds for the authentication rate limit window before remaining OTP tests.");
@@ -768,10 +769,17 @@ try
         var browserPending = await userService.CreateAsync(new UserRegistration {
             PhoneNumber = "9888888821", District = "Chennai", Name = "Browser Pending Synthetic Member", ConsentAccepted = true
         });
+        var browserRejected = await userService.CreateAsync(new UserRegistration {
+            PhoneNumber = "9888888822", District = "Chennai", Name = "Browser Rejected Synthetic Member", ConsentAccepted = true
+        });
+        var browserCorrection = await userService.CreateAsync(new UserRegistration {
+            PhoneNumber = "9888888823", District = "Chennai", Name = "Browser Correction Synthetic Member", ConsentAccepted = true
+        });
         var fixturePath = Path.Combine(runRoot, "admin-edit-browser-fixture.json");
         await File.WriteAllTextAsync(fixturePath, System.Text.Json.JsonSerializer.Serialize(new {
             root, runRoot, apiUrl = http.BaseAddress!.ToString().TrimEnd('/'),
             adminToken, memberToken, userId = newId, otherId = legacy.Id, pendingId = browserPending.Id,
+            rejectedId = browserRejected.Id, correctionId = browserCorrection.Id,
             photoPath = uploadSnapshots.Keys.Last()
         }));
         var browserStart = new ProcessStartInfo("node") { UseShellExecute = false, CreateNoWindow = true,
@@ -789,6 +797,13 @@ try
         Check(browserApproved.ApprovedAt.HasValue && browserApproved.ApprovalDecidedBy == "test-admin" &&
             browserApproved.EditHistory[^1].Changes["ApprovalStatus"].NewValue == "Approved",
             "browser dashboard approval persists actor and audit without duplicate notification");
+        var browserRejectedAfter = await users.Find(u => u.Id == browserRejected.Id).SingleAsync();
+        var browserCorrectionAfter = await users.Find(u => u.Id == browserCorrection.Id).SingleAsync();
+        Check(UserService.GetApprovalStatus(browserRejectedAfter) == "Rejected" &&
+            UserService.GetApprovalStatus(browserCorrectionAfter) == "Correction requested" &&
+            browserRejectedAfter.EditHistory[^1].Changes["ApprovalStatus"].NewValue == "Rejected" &&
+            browserCorrectionAfter.EditHistory[^1].Changes["ApprovalStatus"].NewValue == "Correction requested",
+            "quick preview rejection and correction persist status and audit");
         var browserEdited = await users.Find(u => u.Id == newId).SingleAsync();
         Check(browserEdited.Name == "Browser Edited Synthetic Member" && browserEdited.District == "Coimbatore" &&
             browserEdited.Posting == "மாவட்ட தலைவர்" &&
@@ -834,33 +849,49 @@ try
         afterPhoto.MemberId == beforePhoto.MemberId && afterPhoto.CreatedAt == beforePhoto.CreatedAt && afterPhoto.CardExpiresAt == beforePhoto.CardExpiresAt &&
         afterPhoto.ApprovedAt == beforePhoto.ApprovedAt && afterPhoto.EditHistory.Count == beforePhoto.EditHistory.Count + 1,
         "photo replacement updates card and audit without changing identity, approval or validity");
-    var reviewRoute = $"/api/admin/users/{newId}/document-review";
+    var reviewRoute = $"/api/admin/users/{legacy.Id}/document-review";
     Check((await PutEdit(reviewRoute, new { kind = "aadhaar", status = "Correction requested", correction = "Synthetic clearer document needed" }, memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "member cannot set an admin document review status");
+    Check((await PutEdit($"/api/admin/users/{newId}/document-review", new { kind = "aadhaar", status = "Correction requested" }, adminToken)).StatusCode == HttpStatusCode.BadRequest,
+        "number-only registrations cannot be sent to Aadhaar image review");
     await Json(await PutEdit(reviewRoute, new { kind = "aadhaar", status = "Correction requested", correction = "Synthetic clearer document needed" }, adminToken),
-        HttpStatusCode.OK, "admin requests Aadhaar correction");
-    var correctionStatus = await Json(await GetWithToken($"/api/users/{newId}/document-status", memberToken), HttpStatusCode.OK,
+        HttpStatusCode.OK, "admin requests historical Aadhaar image correction");
+    var correctionStatus = await Json(await GetWithToken($"/api/users/{legacy.Id}/document-status", legacyToken), HttpStatusCode.OK,
         "member sees requested correction status");
     Check(correctionStatus["aadhaarReviewStatus"]!.GetValue<string>() == "Correction requested" &&
+        correctionStatus["hasLegacyAadhaarImage"]!.GetValue<bool>() &&
         correctionStatus["documentCorrectionRequest"]!.GetValue<string>() == "Synthetic clearer document needed",
-        "admin correction guidance reaches the owning member");
+        "historical image correction guidance reaches only its owner");
+    var numberOnlyStatus = await Json(await GetWithToken($"/api/users/{newId}/document-status", memberToken), HttpStatusCode.OK,
+        "new member sees number-only document status");
+    Check(!numberOnlyStatus["hasLegacyAadhaarImage"]!.GetValue<bool>(), "new registration has no Aadhaar image correction control");
     Check((await GetWithToken($"/api/users/{legacy.Id}/document-status", memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "member cannot see another member's document review");
-    var beforeCorrection = await users.Find(u => u.Id == newId).SingleAsync();
+    var beforeCorrection = await users.Find(u => u.Id == legacy.Id).SingleAsync();
     using (var correction = new MultipartFormDataContent())
     {
         var image = new ByteArrayContent(uploadSnapshots.Values.First());
         image.Headers.ContentType = new MediaTypeHeaderValue("image/png");
         correction.Add(image, "image", "synthetic-correction.png");
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/users/{newId}/document-correction/aadhaar") { Content = correction };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
-        await Json(await http.SendAsync(request), HttpStatusCode.OK, "member supplies requested Aadhaar correction");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/users/{legacy.Id}/document-correction/aadhaar") { Content = correction };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", legacyToken);
+        await Json(await http.SendAsync(request), HttpStatusCode.OK, "historical member supplies requested Aadhaar correction");
     }
-    var corrected = await users.Find(u => u.Id == newId).SingleAsync();
+    var corrected = await users.Find(u => u.Id == legacy.Id).SingleAsync();
     Check(corrected.AadhaarPhotoPath != beforeCorrection.AadhaarPhotoPath && corrected.AadhaarReviewStatus == "Needs review" &&
         corrected.MemberId == beforeCorrection.MemberId && corrected.CardExpiresAt == beforeCorrection.CardExpiresAt &&
         corrected.EditHistory.Count == beforeCorrection.EditHistory.Count + 1,
         "corrected Aadhaar is private, returns to review, and preserves member identity with audit");
+    using (var forbiddenCorrection = new MultipartFormDataContent())
+    {
+        var image = new ByteArrayContent(uploadSnapshots.Values.First());
+        image.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        forbiddenCorrection.Add(image, "image", "synthetic-correction.png");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/users/{newId}/document-correction/aadhaar") { Content = forbiddenCorrection };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", memberToken);
+        Check((await http.SendAsync(request)).StatusCode == HttpStatusCode.BadRequest,
+            "number-only member cannot upload an Aadhaar image through correction API");
+    }
     var decisionRoute = $"/api/admin/users/{newId}/approval-decision";
     Check((await PutEdit(decisionRoute, new { decision = "Rejected" }, memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "member cannot reject or approve registration");
@@ -877,8 +908,8 @@ try
         HttpStatusCode.OK, "admin requests member correction");
     var correctionDecision = await users.Find(u => u.Id == newId).SingleAsync();
     Check(correctionDecision.VerificationStatus == "Correction requested" && correctionDecision.DocumentCorrectionRequest.Length > 0 &&
-        correctionDecision.ProfilePhotoReviewStatus == "Correction requested" && correctionDecision.AadhaarReviewStatus == "Correction requested",
-        "correction decision reaches member document workflow");
+        correctionDecision.ProfilePhotoReviewStatus == "Correction requested" && correctionDecision.AadhaarReviewStatus == "Number provided",
+        "correction decision requests passport changes without asking number-only members for Aadhaar images");
     Check((await GetWithToken($"/api/users/{newId}/id-card", memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "correction-requested member cannot access card");
     var parallelApprovals = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => PutEdit(decisionRoute, new { decision = "Approved" }, adminToken)));
