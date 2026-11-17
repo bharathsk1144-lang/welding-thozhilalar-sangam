@@ -83,6 +83,7 @@ static class ReadinessChecks
             ["Admin:Username"] = admin.Username, ["Admin:PasswordHash"] = admin.PasswordHash, ["Admin:JwtKey"] = admin.JwtKey,
             ["Admin:Issuer"] = "test", ["Admin:Audience"] = "test", ["MongoDb:ConnectionString"] = "mongodb://synthetic:synthetic@127.0.0.1:27017",
             ["MongoDb:DatabaseName"] = "Synthetic", ["Uploads:Provider"] = "Cloudinary",
+            ["Aadhaar:EncryptionKey"] = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)),
             ["Cloudinary:CloudName"] = "synthetic", ["Cloudinary:ApiKey"] = "synthetic-key", ["Cloudinary:ApiSecret"] = "synthetic-secret",
             ["Cors:AllowedOrigins:0"] = "https://www.weldingthozhilalarsangam.com"
         };
@@ -96,7 +97,7 @@ static class ReadinessChecks
             try { ProductionConfiguration.Validate(Config(weak), environment); throw new Exception("Obvious weak signing key passed"); }
             catch (InvalidOperationException) { check(true, "production rejects repeated/template signing keys"); }
         }
-        foreach (var key in new[] { "Admin:JwtKey", "Admin:PasswordHash", "MongoDb:ConnectionString", "Uploads:Provider", "Cloudinary:CloudName", "Cloudinary:ApiKey", "Cloudinary:ApiSecret", "Cors:AllowedOrigins:0" })
+        foreach (var key in new[] { "Admin:JwtKey", "Admin:PasswordHash", "MongoDb:ConnectionString", "Uploads:Provider", "Cloudinary:CloudName", "Cloudinary:ApiKey", "Cloudinary:ApiSecret", "Aadhaar:EncryptionKey", "Cors:AllowedOrigins:0" })
         {
             var invalid = new Dictionary<string, string?>(settings) { [key] = key == "MongoDb:ConnectionString" ? "mongodb://localhost" : "" };
             try { ProductionConfiguration.Validate(Config(invalid), environment); throw new Exception("Unsafe production configuration passed"); }

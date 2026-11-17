@@ -36,5 +36,11 @@ public static class ProductionConfiguration
             new[] { "Cloudinary:CloudName", "Cloudinary:ApiKey", "Cloudinary:ApiSecret" }
                 .Any(key => string.IsNullOrWhiteSpace(configuration[key]) || configuration[key]!.Contains("REPLACE", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Production requires Cloudinary authenticated private storage credentials; local uploads are ephemeral.");
+        try
+        {
+            if (Convert.FromBase64String(configuration["Aadhaar:EncryptionKey"] ?? "").Length != 32)
+                throw new FormatException();
+        }
+        catch (FormatException) { throw new InvalidOperationException("Production requires a dedicated 32-byte Aadhaar encryption key."); }
     }
 }

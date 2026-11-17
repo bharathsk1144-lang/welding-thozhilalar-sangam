@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -85,6 +86,7 @@ try
         Check(!MobileNumber.TryNormalize(phone, out _), $"invalid mobile rejected: {phone}");
 
     var legacy = Seed(" +919876543210 ", "WTS-2024-LEGACY");
+    await File.WriteAllBytesAsync(Path.Combine(runRoot, "wwwroot", "uploads", "legacy-aadhaar.png"), [137, 80, 78, 71, 13, 10, 26, 10]);
     var noPassword = Seed("919876543211", "WTS-2023-OLD", "");
     if (noMigration)
     {
@@ -221,6 +223,7 @@ try
     var settings = new Dictionary<string, string?> {
         ["MongoDb:ConnectionString"] = connection, ["MongoDb:DatabaseName"] = dbName,
         ["Admin:JwtKey"] = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)),
+        ["Aadhaar:EncryptionKey"] = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)),
         ["Admin:Issuer"] = "SecurityTests", ["Admin:Audience"] = "SecurityTests",
         ["Admin:Username"] = "test-admin", ["Admin:Password"] = "IsolatedAdmin@123", ["Admin:PasswordHash"] = "",
         ["SMS_ENABLED"] = "false", ["Membership:OrganizationRegistrationNumber"] = officialIds ? "TEST-REG/2026" : "",
@@ -257,7 +260,7 @@ try
     }
     async Task<JsonObject> Post(string route, object body, HttpStatusCode expected, string name) =>
         await Json(await http.PostAsJsonAsync(route, body), expected, name);
-    MultipartFormDataContent Registration(string phone, string token = "", string name = "New member", string password = "NewMember@123", bool consent = true)
+    MultipartFormDataContent Registration(string phone, string token = "", string name = "New member", string password = "NewMember@123", bool consent = true, string? aadhaarNumber = "234567890124")
     {
         var form = new MultipartFormDataContent();
         foreach (var field in new Dictionary<string, string> { ["phoneNumber"] = phone, ["verificationToken"] = token,
@@ -265,7 +268,8 @@ try
             ["bloodGroup"] = "O+", ["fatherName"] = "Test father", ["permanentAddress"] = "Isolated test address",
             ["pincode"] = "600001", ["district"] = "Chennai", ["hasJoinedWhatsAppGroup"] = "true", ["consentAccepted"] = consent ? "true" : "false" })
             form.Add(new StringContent(field.Value), field.Key);
-        foreach (var field in new[] { "aadhaarPhoto", "profilePhoto" })
+        if (aadhaarNumber is not null) form.Add(new StringContent(aadhaarNumber), "aadhaarNumber");
+        foreach (var field in new[] { "profilePhoto" })
         {
             var portrait = field == "profilePhoto";
             using var bitmap = new SKBitmap(portrait ? 600 : 800, portrait ? 750 : 500);
@@ -317,6 +321,11 @@ try
         "pending login cannot disclose member ID");
     var registeredBefore = (await users.Find(u => u.Id == newId).SingleAsync()).ToJson();
     var newAccount = await users.Find(u => u.Id == newId).SingleAsync();
+    var aadhaarProtector = new AadhaarNumberService(new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+    Check(newAccount.AadhaarPhotoPath == "" && newAccount.AadhaarNumberCiphertext.StartsWith("v1:") &&
+        !newAccount.AadhaarNumberCiphertext.Contains("234567890124") &&
+        aadhaarProtector.Mask(newAccount.AadhaarNumberCiphertext) == "•••• •••• 0124",
+        "new member stores only encrypted Aadhaar number and displays only its last four digits");
     Check(newAccount.MobileVerified == true, "OTP registration stores verified mobile ownership");
     Check(System.Text.RegularExpressions.Regex.IsMatch(newAccount.MemberId, @"^WTS-CHN-[0-9]{4,}$") && newAccount.IdSchemeVersion == 2,
         "new registration stores a district-scoped, immutable server ID");
@@ -326,7 +335,7 @@ try
     Check((await http.GetAsync($"/api/users/verify/{Uri.EscapeDataString(displayId)}")).StatusCode == HttpStatusCode.NotFound,
         "public verification does not disclose pending member ID");
     await Json(await http.GetAsync($"/api/users/verify/{legacy.MemberId}"), HttpStatusCode.OK, "existing year-based verification remains compatible");
-    var uploadSnapshots = new[] { newAccount.AadhaarPhotoPath, newAccount.ProfilePhotoPath }.ToDictionary(
+    var uploadSnapshots = new[] { newAccount.ProfilePhotoPath }.ToDictionary(
         p => Path.Combine(runRoot, "wwwroot", p.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)),
         p => File.ReadAllBytes(Path.Combine(runRoot, "wwwroot", p.TrimStart('/').Replace('/', Path.DirectorySeparatorChar))));
     foreach (var item in new[] { ("9876543230", "Different name", "NewMember@123"), ("9876543230", "New member", "Different@123"),
@@ -343,7 +352,7 @@ try
         "duplicate registration attempts cannot increase public count");
     Check(await users.CountDocumentsAsync(u => u.CanonicalMobile == "9876543230") == 1 &&
         registeredBefore == (await users.Find(u => u.Id == newId).SingleAsync()).ToJson(), "TC11/14/17: duplicate attempts preserve entire account");
-    Check(uploadSnapshots.All(p => File.ReadAllBytes(p.Key).SequenceEqual(p.Value)), "TC17: Aadhaar and passport file bytes remain intact");
+    Check(uploadSnapshots.All(p => File.ReadAllBytes(p.Key).SequenceEqual(p.Value)), "TC17: passport file bytes remain intact");
 
     var login = await Post("/api/users/login", new { phone = "919876543210", password = "Original@123" }, HttpStatusCode.OK, "TC07: correct legacy password and normalized phone");
     Check(login["userId"]!.GetValue<string>() == legacy.Id && !login.ContainsKey("passwordHash"), "login resolves correct account without hash disclosure");
@@ -369,6 +378,13 @@ try
         Check((await GetWithToken(route, memberToken)).StatusCode == HttpStatusCode.Forbidden, "member token cannot access admin route " + route);
     var admin = await Post("/api/admin/login", new { username = "test-admin", password = "IsolatedAdmin@123" }, HttpStatusCode.OK, "admin login preserved");
     var adminToken = admin["token"]!.GetValue<string>();
+    var adminAadhaarView = await Json(await GetWithToken($"/api/admin/users/{newId}", adminToken), HttpStatusCode.OK, "admin sees masked Aadhaar number");
+    Check(adminAadhaarView["aadhaarNumberMasked"]!.GetValue<string>() == "•••• •••• 0124" &&
+        !adminAadhaarView.ToJsonString().Contains("234567890124") &&
+        !adminAadhaarView.ToJsonString().Contains(newAccount.AadhaarNumberCiphertext),
+        "admin API masks Aadhaar and never returns plaintext or ciphertext");
+    Check((await GetWithToken($"/api/admin/users/{newId}", memberToken)).StatusCode == HttpStatusCode.Forbidden,
+        "normal member cannot access admin Aadhaar view");
     var publicContent = await Json(await http.GetAsync("/api/website-content"), HttpStatusCode.OK, "public content includes the original constitution");
     Check(publicContent["aboutMarkdown"]!.GetValue<string>().Contains("விதி 30"), "constitution is preserved before first edit");
     async Task<HttpResponseMessage> PutContent(string? bearer, object body)
@@ -407,7 +423,7 @@ try
         } }), HttpStatusCode.OK, "admin updates gallery image and order");
         Check((await http.GetAsync($"/api/website-content/images/{Path.GetFileName(imagePath)}")).StatusCode == HttpStatusCode.OK,
             "public can view only referenced gallery image");
-        Check((await http.GetAsync($"/api/website-content/images/{Path.GetFileName(newAccount.AadhaarPhotoPath)}")).StatusCode == HttpStatusCode.NotFound,
+        Check((await http.GetAsync($"/api/website-content/images/{Path.GetFileName(legacy.AadhaarPhotoPath)}")).StatusCode == HttpStatusCode.NotFound,
             "private Aadhaar path cannot be served as public website content");
     }
     var originalAbout = publicContent["aboutMarkdown"]!.GetValue<string>();
@@ -499,16 +515,16 @@ try
     var missingCard = await Json(await GetWithToken($"/api/users/{identityFixtures[6].Id}/id-card", adminToken), HttpStatusCode.OK, "legacy missing-ID card read");
     Check(missingCard["memberId"]!.GetValue<string>() == "" && missingCard["displayMemberId"]!.GetValue<string>() == "" &&
         missingBefore == (await users.Find(u => u.Id == identityFixtures[6].Id).SingleAsync()).ToJson(), "missing IDs stay missing after authenticated reads");
-    Check((await GetWithToken(newAccount.AadhaarPhotoPath, null)).StatusCode == HttpStatusCode.Unauthorized &&
+    Check((await GetWithToken(legacy.AadhaarPhotoPath, null)).StatusCode == HttpStatusCode.Unauthorized &&
         (await GetWithToken(newAccount.ProfilePhotoPath, null)).StatusCode == HttpStatusCode.Unauthorized, "uploaded documents are never public static files");
-    Check((await GetWithToken(newAccount.AadhaarPhotoPath, memberToken)).StatusCode == HttpStatusCode.Forbidden,
+    Check((await GetWithToken(legacy.AadhaarPhotoPath, memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "member cannot fetch private Aadhaar even with a valid session");
     Check((await GetWithToken(newAccount.ProfilePhotoPath, login["token"]!.GetValue<string>())).StatusCode == HttpStatusCode.Forbidden,
         "another member cannot fetch passport image");
     var ownerPhoto = await GetWithToken(newAccount.ProfilePhotoPath, memberToken);
     Check(ownerPhoto.IsSuccessStatusCode && ownerPhoto.Headers.CacheControl?.NoStore == true &&
         (await ownerPhoto.Content.ReadAsByteArrayAsync()).SequenceEqual(uploadSnapshots.Values.Last()), "owner passport fetch is authenticated, intact and no-store");
-    Check((await GetWithToken(newAccount.AadhaarPhotoPath, adminToken)).IsSuccessStatusCode &&
+    Check((await GetWithToken(legacy.AadhaarPhotoPath, adminToken)).IsSuccessStatusCode &&
         (await GetWithToken(newAccount.ProfilePhotoPath, adminToken)).IsSuccessStatusCode, "admin document access remains functional");
     using (var preflight = new HttpRequestMessage(HttpMethod.Options, "/api/districts"))
     {
@@ -658,17 +674,16 @@ try
         Check((await users.Find(u => u.Id == unverified.Id).SingleAsync()).PasswordHash == unverified.PasswordHash,
             "blocked recovery preserves unverified account password");
     }
-    var failedUploads = new FailingSecondUpload();
+    var failedUploads = new FailingPassportUpload();
     using (var failingApi = new IsolatedApi(runRoot,
         new Dictionary<string, string?>(settings) { ["Authentication:OtpEnabled"] = "false" }, captured, failedUploads))
     using (var failingHttp = failingApi.CreateClient())
     {
         var failedRegistration = await failingHttp.PostAsync("/api/users/register", Registration("9876543288"));
         Check(failedRegistration.StatusCode == HttpStatusCode.InternalServerError,
-            "failed second private upload blocks registration");
-        Check(failedUploads.SaveCount == 2 && failedUploads.Deleted.Count == 1 &&
-            failedUploads.Deleted[0] == "/uploads/synthetic-first.png",
-            "failed registration cleans up the first private upload");
+            "failed passport upload blocks registration");
+        Check(failedUploads.SaveCount == 1 && failedUploads.Deleted.Count == 0,
+            "failed registration creates no private upload reference");
         Check(!await users.Find(u => u.CanonicalMobile == "9876543288").AnyAsync(),
             "failed upload creates no member record");
     }
@@ -771,7 +786,7 @@ try
             "browser dashboard approval persists actor and audit without duplicate notification");
         var browserEdited = await users.Find(u => u.Id == newId).SingleAsync();
         Check(browserEdited.Name == "Browser Edited Synthetic Member" && browserEdited.District == "Coimbatore" &&
-            browserEdited.Posting == "பொதுச் செயலாளர்" &&
+            browserEdited.Posting == "மாவட்ட தலைவர்" &&
             browserEdited.MemberId == beforeEdit.MemberId && browserEdited.CardExpiresAt == beforeEdit.CardExpiresAt &&
             browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == afterEdit.EditHistory.Count + 2 &&
             browserEdited.EditHistory[^2].Changes[nameof(UserRegistration.Name)].NewValue == browserEdited.Name,
@@ -880,6 +895,18 @@ try
         simultaneous.Select(u => u.MemberId).Order().SequenceEqual(Enumerable.Range(2, 8).Select(i => $"WTS-ALR-{i:D4}")) &&
         (await users.Find(u => u.Id == historicalDistrictId.Id).SingleAsync()).MemberId == "WTS-ALR-0001",
         "eight parallel registrations skip a historical ID and receive unique atomic Ariyalur numbers");
+    using (var invalidApi = new IsolatedApi(runRoot,
+        new Dictionary<string, string?>(settings) { ["Authentication:OtpEnabled"] = "false" }, captured))
+    using (var invalidHttp = invalidApi.CreateClient())
+    {
+        foreach (var invalidNumber in new string?[] { null, "", "2345678901", "2345678901245", "23456789012A", "234567890125" })
+        {
+            using var result = await invalidHttp.PostAsync("/api/users/register", Registration("9876543298", aadhaarNumber: invalidNumber));
+            Check(result.StatusCode == HttpStatusCode.BadRequest, "missing, malformed or checksum-invalid Aadhaar number rejected by API");
+        }
+        Check(!await users.Find(u => u.CanonicalMobile == "9876543298").AnyAsync(),
+            "invalid Aadhaar numbers create no member or ID");
+    }
     Console.WriteLine($"ALL {passed} CHECKS PASSED. Isolated database: {dbName}");
 }
 catch (Exception ex)
@@ -907,15 +934,14 @@ sealed class DisabledSms : ISmsSender
 {
     public Task<bool> SendOtpAsync(string phoneNumber, string otp, CancellationToken cancellationToken = default) => Task.FromResult(false);
 }
-sealed class FailingSecondUpload : IPrivateUploadStorage
+sealed class FailingPassportUpload : IPrivateUploadStorage
 {
     public int SaveCount;
     public List<string> Deleted = [];
     public Task<string> SaveAsync(IFormFile file, string prefix, CancellationToken cancellationToken = default)
     {
         SaveCount++;
-        if (SaveCount == 2) throw new IOException("Synthetic upload failure");
-        return Task.FromResult("/uploads/synthetic-first.png");
+        throw new IOException("Synthetic upload failure");
     }
     public Task<PrivateUpload?> ReadAsync(string filename, CancellationToken cancellationToken = default) =>
         Task.FromResult<PrivateUpload?>(null);

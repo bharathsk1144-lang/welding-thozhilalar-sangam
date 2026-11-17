@@ -26,6 +26,8 @@ public sealed class UserRegistration
     public string Pincode { get; set; } = string.Empty;
     public string District { get; set; } = string.Empty;
     public string AadhaarPhotoPath { get; set; } = string.Empty;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string AadhaarNumberCiphertext { get; set; } = string.Empty;
     public string ProfilePhotoPath { get; set; } = string.Empty;
     public string ProfilePhotoReviewStatus { get; set; } = "Needs review";
     public string AadhaarReviewStatus { get; set; } = "Needs review";

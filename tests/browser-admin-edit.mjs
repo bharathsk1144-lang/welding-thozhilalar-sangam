@@ -99,7 +99,7 @@ try {
   assert.equal(await evaluate("document.querySelector('.registration-form input[name=name]').value"), 'Corrected synthetic member');
   assert.equal(await evaluate("document.querySelector('.registration-form input[name=phoneNumber]').value"), '9876543260');
   assert.equal(await evaluate("document.querySelector('.registration-form select[name=district]').value"), 'Madurai');
-  assert.equal(await evaluate("[...document.querySelectorAll('.registration-form select')].find(field => field.parentElement.textContent.includes('Posting / Responsibility'))?.value"), 'ஊர் தலைவர்');
+  assert.equal(await evaluate("document.querySelector('.registration-form input[name=posting]')?.value"), 'ஊர் தலைவர்');
   assert.ok(await evaluate("[...document.querySelectorAll('.registration-form button')].some(button => button.textContent.trim() === 'Cancel')"));
   await evaluate(`(() => {
     const values = { name: 'Browser Edited Synthetic Member', phoneNumber: '9876543261',
@@ -115,14 +115,14 @@ try {
     }
     const district = document.querySelector('.registration-form select[name=district]');
     district.value = 'Coimbatore'; district.dispatchEvent(new Event('change', { bubbles: true }));
-    const posting = [...document.querySelectorAll('.registration-form select')].find(field => field.parentElement.textContent.includes('Posting / Responsibility'));
-    posting.value = 'பொதுச் செயலாளர்'; posting.dispatchEvent(new Event('change', { bubbles: true }));
+    const posting = document.querySelector('.registration-form input[name=posting]');
+    setter.call(posting, '  மாவட்ட தலைவர்  '); posting.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
   assert.equal(await evaluate("document.querySelector('.registration-form select[name=district]').value"), 'Coimbatore');
   await evaluate("document.querySelector('.registration-form').requestSubmit()");
   await until(() => evaluate("document.querySelector('.details-panel h1')?.textContent === 'Browser Edited Synthetic Member' && document.querySelector('.notice.success')?.textContent.includes('saved successfully')"), 'saved member View');
   await until(() => evaluate("document.querySelector('.admin-id-preview .pass-name dd')?.textContent === 'Browser Edited Synthetic Member'"), 'refreshed card preview');
-  assert.equal(await evaluate("[...document.querySelectorAll('.admin-id-preview .pass-field')].find(field => field.textContent.includes('POSTING'))?.querySelector('dd')?.textContent"), 'பொதுச் செயலாளர்');
+  assert.equal(await evaluate("[...document.querySelectorAll('.admin-id-preview .pass-field')].find(field => field.textContent.includes('POSTING'))?.querySelector('dd')?.textContent"), 'மாவட்ட தலைவர்');
   assert.equal(await evaluate("document.querySelector('.admin-id-preview .pass-front-fields .pass-field:nth-child(3) dd').textContent"), 'Coimbatore');
   assert.equal(await evaluate("document.querySelector('.admin-id-preview .pass-back-fields .pass-field:nth-child(2) dd').textContent"), '9876543261');
   console.log('PASS admin Users View Edit Save and refreshed details/card preview');

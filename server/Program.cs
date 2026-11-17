@@ -71,6 +71,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 builder.Services.AddScoped<UserSessionService>();
 builder.Services.AddScoped<UserService>();
+builder.Services.AddSingleton<AadhaarNumberService>();
 builder.Services.AddScoped<DistrictService>();
 builder.Services.AddScoped<IPublicStatisticsService, PublicStatisticsService>();
 builder.Services.AddScoped<AdminAuthService>();

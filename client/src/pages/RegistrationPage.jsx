@@ -10,6 +10,7 @@ import { dobToIso, formatDobInput, isoToDob } from '../api/dob.js';
 import { clearRegistrationDraft, readRegistrationDraft, saveRegistrationDraft } from '../api/registrationDraft.js';
 import { inspectImage } from '../api/imageSuitability.js';
 import PhotoCropper from '../components/PhotoCropper.jsx';
+import { validAadhaarNumber, AADHAAR_HINT } from '../api/aadhaarNumber.js';
 
 const emptyForm = {
   name: '',
@@ -19,7 +20,7 @@ const emptyForm = {
   permanentAddress: '',
   pincode: '',
   district: '',
-  aadhaarPhoto: null,
+  aadhaarNumber: '',
   profilePhoto: null,
   hasJoinedWhatsAppGroup: false,
   consentAccepted: false
@@ -31,7 +32,6 @@ export default function RegistrationPage() {
   const submitting = useRef(false);
   const imageSelection = useRef({});
   const draftCancelled = useRef(false);
-  const aadhaarInput = useRef(null);
   const passportInput = useRef(null);
   const [imageWarnings, setImageWarnings] = useState({});
   const [imagePreviews, setImagePreviews] = useState({});
@@ -161,6 +161,7 @@ export default function RegistrationPage() {
     draftCancelled.current = false;
     const { name, value, type, checked, files } = event.target;
     if (type === 'file') { chooseImage(name, files[0]); return; }
+    if (name === 'aadhaarNumber' && !/^[0-9]{0,12}$/.test(value)) { setError(AADHAAR_HINT); return; }
     setForm((current) => ({
       ...current,
       [name]: type === 'checkbox' ? checked : type === 'file' ? files[0] : name === 'dateOfBirth' ? formatDobInput(value) : value
@@ -176,9 +177,8 @@ export default function RegistrationPage() {
     setImagePreviews((current) => ({ ...current, [name]: '' }));
     setImageWarnings((current) => ({ ...current, [name]: 'Checking image locally…' }));
     setError('');
-    const kind = name === 'profilePhoto' ? 'passport' : 'aadhaar';
     let result;
-    try { result = await inspectImage(file, kind); }
+    try { result = await inspectImage(file, 'passport'); }
     catch { result = { error: 'This image could not be checked. Choose another image.' }; }
     if (imageSelection.current[name] !== selection) return;
     setImageWarnings((current) => ({ ...current, [name]: result.error || result.warning || '' }));
@@ -232,14 +232,14 @@ export default function RegistrationPage() {
       return;
     }
 
-    const aadhaarError = validateFile(form.aadhaarPhoto, 5, 'Aadhaar card photo');
+    if (!validAadhaarNumber(form.aadhaarNumber)) { setError(AADHAAR_HINT); return; }
     const profileError = validateFile(form.profilePhoto, 3, 'Passport Size Photo');
-    if (aadhaarError || profileError) {
-      setError(aadhaarError || profileError);
+    if (profileError) {
+      setError(profileError);
       return;
     }
     submitting.current = true;
-    for (const [name, kind] of [['aadhaarPhoto', 'aadhaar'], ['profilePhoto', 'passport']]) {
+    for (const [name, kind] of [['profilePhoto', 'passport']]) {
       let result;
       try { result = await inspectImage(form[name], kind); }
       catch { result = { error: 'This image could not be checked. Choose another image.' }; }
@@ -259,6 +259,7 @@ export default function RegistrationPage() {
     try {
       const result = await api.registerUser(formData);
       clearRegistrationDraft();
+      setForm((current) => ({ ...current, aadhaarNumber: '' }));
       setMessage(result.message);
       if (result.userId) {
         sessionStorage.setItem('wtsUserToken', result.token);
@@ -529,13 +530,9 @@ export default function RegistrationPage() {
                 <div className="section-kicker">Documents</div>
                 <div className="form-grid two">
                   <label>
-                    <span>Aadhaar card photo / ஆதார் அட்டை படம்</span>
-                    <strong className="upload-warning">PLEASE UPLOAD A CLEAR AND VALID AADHAAR CARD IMAGE. OTHER PHOTOS OR UNRELATED DOCUMENTS ARE NOT ACCEPTED.</strong>
-                    <input ref={aadhaarInput} required={!form.aadhaarPhoto} type="file" name="aadhaarPhoto" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" onChange={updateForm} />
-                    {imagePreviews.aadhaarPhoto && <img className="upload-preview" src={imagePreviews.aadhaarPhoto} alt="Selected Aadhaar preview" />}
-                    {imageWarnings.aadhaarPhoto && <small role="status">{imageWarnings.aadhaarPhoto}</small>}
-                    <button type="button" className="secondary" onClick={() => aadhaarInput.current?.click()}>Choose Another Image</button>
-                    <small>Upload Aadhaar card photo. Max 5 MB.</small>
+                    <span>ஆதார் எண் / Aadhaar Number <strong className="required-star" aria-label="required">*</strong></span>
+                    <input required type="text" name="aadhaarNumber" inputMode="numeric" autoComplete="off" pattern="[2-9][0-9]{11}" maxLength={12} value={form.aadhaarNumber} onChange={updateForm} aria-describedby="aadhaar-number-hint" />
+                    <small id="aadhaar-number-hint">{AADHAAR_HINT}</small>
                   </label>
                   <label>
                     <span>Passport Size Photo / பாஸ்போர்ட் அளவு படம்</span>

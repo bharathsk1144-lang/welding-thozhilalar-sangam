@@ -16,11 +16,13 @@ public sealed class AdminController : ControllerBase
 {
     private readonly AdminAuthService _adminAuthService;
     private readonly UserService _userService;
+    private readonly AadhaarNumberService _aadhaarNumbers;
 
-    public AdminController(AdminAuthService adminAuthService, UserService userService)
+    public AdminController(AdminAuthService adminAuthService, UserService userService, AadhaarNumberService aadhaarNumbers)
     {
         _adminAuthService = adminAuthService;
         _userService = userService;
+        _aadhaarNumbers = aadhaarNumbers;
     }
 
     [HttpPost("login")]
@@ -108,6 +110,7 @@ public sealed class AdminController : ControllerBase
             user.ProfilePhotoReviewStatus,
             user.AadhaarReviewStatus,
             user.DocumentCorrectionRequest) { Posting = PostingPolicy.Display(user.Posting),
+                AadhaarNumberMasked = _aadhaarNumbers.Mask(user.AadhaarNumberCiphertext),
                 ApprovalDecidedAt = user.ApprovalDecidedAt, ApprovalDecidedBy = user.ApprovalDecidedBy }));
     }
 

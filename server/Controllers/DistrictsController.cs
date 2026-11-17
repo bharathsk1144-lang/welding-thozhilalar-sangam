@@ -23,7 +23,7 @@ public sealed class DistrictsController : ControllerBase
         return Ok(await _districtService.GetAllAsync());
     }
 
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [HttpPost]
     public async Task<IActionResult> CreateDistrict(DistrictRequest? request)
     {
@@ -54,7 +54,7 @@ public sealed class DistrictsController : ControllerBase
         return CreatedAtAction(nameof(GetDistricts), new { id = district.Id }, district);
     }
 
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [HttpPut("{id}")]
     public async Task<IActionResult> UpdateDistrict(string id, DistrictRequest? request)
     {

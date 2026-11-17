@@ -11,9 +11,8 @@ import { inspectImage } from '../api/imageSuitability.js';
 import { isoToDob } from '../api/dob.js';
 
 const editableFields = ['name', 'phoneNumber', 'location', 'posting', 'dateOfBirth', 'bloodGroup', 'fatherName', 'permanentAddress', 'pincode', 'district'];
-const suggestedPostings = ['MEMBER', 'ஊர் தலைவர்', 'பொதுச் செயலாளர்', 'துணைத் தலைவர்', 'பொருளாளர்', 'மாவட்ட ஒருங்கிணைப்பாளர்'];
 const editValues = (member) => Object.fromEntries(editableFields.map((field) => [field,
-  field === 'dateOfBirth' ? (member[field] || '').slice(0, 10) : member[field] || ''
+  field === 'dateOfBirth' ? (member[field] || '').slice(0, 10) : field === 'posting' ? member.posting || 'MEMBER' : member[field] || ''
 ]));
 
 export default function UserDetailsPage() {
@@ -51,6 +50,8 @@ export default function UserDetailsPage() {
     setError(''); setMessage('');
     const phone = normalizeMobile(form.phoneNumber);
     if (!phone) { setError('Enter a valid Indian mobile number.'); return; }
+    const posting = form.posting.trim();
+    if (!posting || posting.length > 60) { setError('Posting must be 1 to 60 characters.'); return; }
     if (!/^\d{6}$/.test(form.pincode.trim())) { setError('Pincode must be 6 digits.'); return; }
     if (!form.dateOfBirth || form.dateOfBirth >= new Date().toISOString().slice(0, 10)) {
       setError('A valid date of birth is required.'); return;
@@ -58,7 +59,7 @@ export default function UserDetailsPage() {
     setSaving(true);
     let saved = false;
     try {
-      await api.adminUpdateUser(id, { ...form, phoneNumber: phone });
+      await api.adminUpdateUser(id, { ...form, phoneNumber: phone, posting });
       saved = true;
       setEditing(false); setForm(null); setCard(null);
       const [updated, updatedCard] = await Promise.all([api.adminUserDetails(id), api.idCard(id)]);
@@ -157,8 +158,7 @@ export default function UserDetailsPage() {
                   <label><span>Name</span><input required maxLength={100} name="name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
                   <label><span>Mobile Number</span><input required name="phoneNumber" inputMode="numeric" pattern={MOBILE_PATTERN} value={form.phoneNumber} onChange={(event) => setForm({ ...form, phoneNumber: event.target.value })} /></label>
                   <label><span>Location (legacy, optional)</span><input maxLength={150} name="location" value={form.location || ''} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
-                  <label><span>Posting / Responsibility</span><select value={suggestedPostings.includes(form.posting) ? form.posting : 'custom'} onChange={(event) => setForm({ ...form, posting: event.target.value === 'custom' ? '' : event.target.value })}>{suggestedPostings.map((role) => <option key={role} value={role}>{role}</option>)}<option value="custom">Custom responsibility</option></select></label>
-                  {!suggestedPostings.includes(form.posting) && <label><span>Custom posting</span><input required maxLength={60} value={form.posting} onChange={(event) => setForm({ ...form, posting: event.target.value })} /></label>}
+                  <label><span>Posting / Responsibility</span><input required name="posting" maxLength={60} value={form.posting} onChange={(event) => setForm({ ...form, posting: event.target.value })} /></label>
                   <label><span>Date of Birth</span><input required type="date" name="dateOfBirth" value={form.dateOfBirth} onChange={(event) => setForm({ ...form, dateOfBirth: event.target.value })} /></label>
                   <label><span>Blood Group</span><select required name="bloodGroup" value={form.bloodGroup} onChange={(event) => setForm({ ...form, bloodGroup: event.target.value })}><option value="">Select blood group</option>{['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((group) => <option key={group} value={group}>{group}</option>)}</select></label>
                   <label><span>Father Name</span><input required maxLength={100} name="fatherName" value={form.fatherName} onChange={(event) => setForm({ ...form, fatherName: event.target.value })} /></label>
@@ -181,6 +181,7 @@ export default function UserDetailsPage() {
               <Detail label="ID Card Status" value={user.idCardStatus} />
               <Detail label="Status" value={user.status || 'Active Member'} />
               <Detail label="Posting / Responsibility" value={user.posting || 'MEMBER'} />
+              <Detail label="Aadhaar Number" value={user.aadhaarNumberMasked || (user.aadhaarPhotoPath ? 'Legacy image on file' : 'Not recorded')} />
               <Detail label="Verification Status" value={user.verificationStatus || 'Pending'} />
               <Detail label="Approval decision by" value={user.approvalDecidedBy} />
               <Detail label="Approval decision at" value={user.approvalDecidedAt ? new Date(user.approvalDecidedAt).toLocaleString() : ''} />
@@ -206,10 +207,10 @@ export default function UserDetailsPage() {
 
             <div className="photo-grid">
               <figure>
-                <ProtectedImage path={user.aadhaarPhotoPath} ownerId={user.id} adminOnly alt="Aadhaar upload" />
-                <figcaption>Aadhaar card photo · {user.aadhaarReviewStatus || 'Needs review'}</figcaption>
-                <button type="button" onClick={() => reviewDocument('aadhaar', 'Accepted')}>Accept</button>
-                <button type="button" onClick={() => reviewDocument('aadhaar', 'Correction requested')}>Request correction</button>
+                {user.aadhaarPhotoPath && <ProtectedImage path={user.aadhaarPhotoPath} ownerId={user.id} adminOnly alt="Legacy Aadhaar upload" />}
+                <figcaption>{user.aadhaarPhotoPath ? `Legacy Aadhaar card photo · ${user.aadhaarReviewStatus || 'Needs review'}` : 'Aadhaar number on file · format and checksum validated'}</figcaption>
+                {user.aadhaarPhotoPath && <button type="button" onClick={() => reviewDocument('aadhaar', 'Accepted')}>Accept</button>}
+                {user.aadhaarPhotoPath && <button type="button" onClick={() => reviewDocument('aadhaar', 'Correction requested')}>Request correction</button>}
               </figure>
               <figure>
                 <ProtectedImage path={user.profilePhotoPath} ownerId={user.id} adminOnly alt="Passport size upload" />

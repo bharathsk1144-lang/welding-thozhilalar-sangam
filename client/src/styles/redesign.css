@@ -306,6 +306,7 @@ input[readonly] { background: #eeeae0; color: #59554c; border-style: dashed; cur
 .pass-website-qr img { display: block; background: white; width: 84px; height: 84px; image-rendering: pixelated; }
 .pass-website-qr small { text-align: center; font-size: 7px; line-height: 1.2; color: var(--ink); }
 .upload-warning { display: block; margin: 8px 0; padding: 8px; border-left: 4px solid var(--gold); background: var(--card-blush); color: var(--ink); font-size: 12px; line-height: 1.5; }
+.required-star { color: #b00020; font-size: 1.25em; font-weight: 800; }
 .upload-preview { display: block; width: min(100%, 240px); max-height: 280px; object-fit: contain; margin: 10px 0; background: white; }
 .photo-cropper { width: min(100%, 420px); padding: 16px; border: 2px solid var(--gold); background: white; margin: 12px auto; }
 .photo-cropper canvas { display: block; width: min(100%, 240px); height: auto; margin: auto; }

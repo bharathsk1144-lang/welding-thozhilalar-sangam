@@ -25,6 +25,7 @@ public sealed class UsersController : ControllerBase
     private readonly DistrictService _districtService;
     private readonly UserService _userService;
     private readonly UserSessionService _sessions;
+    private readonly AadhaarNumberService _aadhaarNumbers;
     private readonly PasswordHasher<UserRegistration> _passwordHasher = new();
 
     public UsersController(
@@ -35,6 +36,7 @@ public sealed class UsersController : ControllerBase
         UserSessionService sessions,
         IPrivateUploadStorage uploads,
         ILogger<UsersController> logger,
+        AadhaarNumberService aadhaarNumbers,
         IConfiguration configuration)
     {
         _environment = environment;
@@ -45,6 +47,7 @@ public sealed class UsersController : ControllerBase
         _districtService = districtService;
         _userService = userService;
         _sessions = sessions;
+        _aadhaarNumbers = aadhaarNumbers;
     }
 
     [HttpPost("register")]
@@ -70,12 +73,10 @@ public sealed class UsersController : ControllerBase
             return BadRequest(new { message = "OTP verification is required before registration." });
         }
 
-        string? aadhaarPath = null;
         string? profilePath = null;
         UserRegistration user;
         try
         {
-            aadhaarPath = await _uploads.SaveAsync(request.AadhaarPhoto!, "aadhaar", HttpContext.RequestAborted);
             profilePath = await _uploads.SaveAsync(request.ProfilePhoto!, "profile", HttpContext.RequestAborted);
 
         user = new UserRegistration
@@ -92,10 +93,10 @@ public sealed class UsersController : ControllerBase
             PermanentAddress = request.PermanentAddress.Trim(),
             Pincode = request.Pincode.Trim(),
             District = request.District.Trim(),
-            AadhaarPhotoPath = aadhaarPath,
+            AadhaarNumberCiphertext = _aadhaarNumbers.Encrypt(request.AadhaarNumber),
             ProfilePhotoPath = profilePath,
             ProfilePhotoReviewStatus = "Needs review",
-            AadhaarReviewStatus = "Needs review",
+            AadhaarReviewStatus = "Number provided",
             ConsentAccepted = request.ConsentAccepted
         };
 
@@ -104,7 +105,6 @@ public sealed class UsersController : ControllerBase
         catch
         {
             await TryDeleteAsync(profilePath);
-            await TryDeleteAsync(aadhaarPath);
             throw;
         }
         var session = _sessions.Create(user);
@@ -430,13 +430,8 @@ public sealed class UsersController : ControllerBase
             return "Selected district is invalid.";
         }
 
-        var aadhaarError = await UploadValidation.ValidateAsync(request.AadhaarPhoto, 5 * 1024 * 1024, "Aadhaar card photo");
-        if (aadhaarError is not null)
-        {
-            return aadhaarError;
-        }
-        var (aadhaarImageError, _) = await ImageSuitability.CheckAsync(request.AadhaarPhoto!, false, HttpContext.RequestAborted);
-        if (aadhaarImageError is not null) return aadhaarImageError;
+        if (!AadhaarNumberService.IsValid(request.AadhaarNumber))
+            return "சரியான 12 இலக்க ஆதார் எண்ணை உள்ளிடவும் / Enter a valid 12-digit Aadhaar number.";
 
         var profileError = await UploadValidation.ValidateAsync(request.ProfilePhoto, 3 * 1024 * 1024, "Passport Size Photo");
         if (profileError is not null)

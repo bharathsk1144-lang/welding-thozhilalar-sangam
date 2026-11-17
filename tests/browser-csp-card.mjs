@@ -147,47 +147,14 @@ try {
     set.call(inputs[1], '9876543210'); inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
   await evaluate("document.querySelector('.form-panel form').requestSubmit()");
-  await until(() => evaluate("document.querySelector('input[name=aadhaarPhoto]') !== null"), 'document chooser');
-  await evaluate(`(async () => {
-    const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 700;
-    const context = canvas.getContext('2d'); context.fillStyle = '#fff'; context.fillRect(0, 0, 1200, 700);
-    context.fillStyle = '#111'; context.font = 'bold 88px Arial'; context.fillText('AADHAAR', 100, 170);
-    context.font = 'bold 42px Arial'; context.fillText('UNIQUE IDENTIFICATION AUTHORITY OF INDIA', 100, 255);
-    for (let i = 0; i < 8; i++) context.fillText('SYNTHETIC DOCUMENT TEST', 100, 330 + i * 42);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    const input = document.querySelector('input[name=aadhaarPhoto]');
-    const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'synthetic-aadhaar.png', { type: 'image/png' }));
-    input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
-  try {
-    await until(() => evaluate("[...document.querySelectorAll('.registration-form small[role=status]')].some(x => x.textContent.includes('Aadhaar-related text was detected locally'))"), 'local Aadhaar OCR recognition', 30000);
-  } catch (error) {
-    console.error('Local image diagnostic:', JSON.stringify({
-      warnings: await evaluate("[...document.querySelectorAll('.registration-form small[role=status]')].map(x => x.textContent)"),
-      alerts: await evaluate("[...document.querySelectorAll('.registration-form .notice.error')].map(x => x.textContent)"),
-      imageRequests, violations: await evaluate('window.__cspViolations')
-    }));
-    throw error;
-  }
-  await evaluate(`(async () => {
-    const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 700;
-    const context = canvas.getContext('2d'); context.fillStyle = '#fff'; context.fillRect(0, 0, 1200, 700);
-    context.fillStyle = '#111'; context.font = 'bold 80px Arial'; context.fillText('PAN CARD', 100, 170);
-    context.font = 'bold 48px Arial'; context.fillText('INCOME TAX DEPARTMENT', 100, 280);
-    for (let i = 0; i < 7; i++) context.fillText('SYNTHETIC TEST DOCUMENT', 100, 360 + i * 42);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    const input = document.querySelector('input[name=aadhaarPhoto]');
-    const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'synthetic-pan.png', { type: 'image/png' }));
-    input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
-  await until(() => evaluate("document.querySelector('.form-panel .notice.error')?.textContent.includes('different document')"), 'local OCR rejects unrelated PAN document', 30000);
-  await evaluate(`(async () => {
-    const blob = await (await fetch(${JSON.stringify(apiBase.replace(/\/api$/, '') + '/synthetic-passport.png')})).blob();
-    const input = document.querySelector('input[name=aadhaarPhoto]');
-    const transfer = new DataTransfer(); transfer.items.add(new File([blob], 'unrelated-portrait.png', { type: 'image/png' }));
-    input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
-  await until(() => evaluate("document.querySelector('.form-panel .notice.error')?.textContent.includes('portrait rather than an Aadhaar')"), 'unrelated portrait rejected as Aadhaar', 30000);
+  await until(() => evaluate("document.querySelector('input[name=aadhaarNumber]') !== null"), 'mandatory Aadhaar number input');
+  assert.ok(await evaluate(`(() => {
+    const field = document.querySelector('input[name=aadhaarNumber]');
+    const star = field.closest('label').querySelector('.required-star');
+    return !document.querySelector('input[name=aadhaarPhoto]') && field.required &&
+      field.inputMode === 'numeric' && field.maxLength === 12 && star?.textContent === '*' &&
+      getComputedStyle(star).color === 'rgb(176, 0, 32)';
+  })()`), 'red required star and numeric input replace Aadhaar image upload');
   await evaluate(`(async () => {
     const image = await createImageBitmap(await (await fetch(${JSON.stringify(apiBase.replace(/\/api$/, '') + '/synthetic-passport.png')})).blob());
     const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 750;
@@ -258,13 +225,13 @@ try {
   await until(() => evaluate("document.querySelector('.form-panel .notice.error')?.textContent.includes('contents do not match')"), 'wrong-file upload rejected');
   assert.ok(imageRequests.some(url => url.includes('/vision/blaze_face_short_range.tflite')), 'local face model loaded');
   assert.ok(existsSync(path.join(dist, 'ocr', 'eng.traineddata.gz')), 'OCR language model is packaged locally');
-  assert.ok(imageRequests.every(url => url.startsWith(origin + '/')), 'models and OCR load only from this site');
+  assert.ok(imageRequests.every(url => url.startsWith(origin + '/')), 'face model loads only from this site');
   const violations = [...beforeReload, ...afterCard, ...await evaluate('window.__cspViolations')];
   const counts = Object.entries(violations.reduce((acc, item) => {
     const key = `${item.directive} ${item.blocked} ${item.disposition}`;
     acc[key] = (acc[key] || 0) + 1; return acc;
   }, {}));
-  console.log(`Card preview, PNG, PDF and local Aadhaar OCR: PASS; CSP reports: ${JSON.stringify(counts)}`);
+  console.log(`Card preview, PNG, PDF and Aadhaar number UI: PASS; CSP reports: ${JSON.stringify(counts)}`);
   if (process.env.WTS_CSP_ENFORCE === '1') assert.equal(violations.length, 0, 'enforced policy has no card violations');
 } finally {
   socket?.close(); browser.kill();

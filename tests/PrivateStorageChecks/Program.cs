@@ -31,6 +31,7 @@ var productionValues = new Dictionary<string, string?>
     ["Cors:AllowedOrigins:0"] = "https://example.test",
     ["MongoDb:ConnectionString"] = "mongodb://synthetic:synthetic@localhost",
     ["MongoDb:DatabaseName"] = "WTS_Synthetic",
+    ["Aadhaar:EncryptionKey"] = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)),
     ["Uploads:Provider"] = "Local"
 };
 try

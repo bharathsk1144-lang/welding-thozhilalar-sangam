@@ -21,7 +21,7 @@ public sealed class RegisterUserRequest
     public bool HasJoinedWhatsAppGroup { get; set; }
     public bool ConsentAccepted { get; set; }
     public string ConsentPolicyVersion { get; set; } = string.Empty;
-    public IFormFile? AadhaarPhoto { get; set; }
+    public string AadhaarNumber { get; set; } = string.Empty;
     public IFormFile? ProfilePhoto { get; set; }
 }
 
@@ -93,6 +93,7 @@ public sealed record UserDetailsDto(
     public string Posting { get; set; } = "MEMBER";
     public DateTime? ApprovalDecidedAt { get; set; }
     public string ApprovalDecidedBy { get; set; } = string.Empty;
+    public string AadhaarNumberMasked { get; set; } = string.Empty;
     public string DisplayMemberId { get; set; } = MemberId;
     public string? MemberIdDisplayWarning { get; set; }
 }
