@@ -187,9 +187,9 @@ input[readonly] { background: #eeeae0; color: #59554c; border-style: dashed; cur
 .pass-organization-contact dt { display: flex; justify-content: center; align-items: center; height: 16px; }
 .pass-contact-icon { display: block; flex: none; width: 12px; height: 12px; }
 .pass-organization-contact dd { white-space: pre-wrap; }
-.pass-thirukkural { margin: 0 18px 12px; padding: 8px 4px 0; border-top: 1px solid var(--line); color: #50370f; text-align: center; font-weight: 800; }
-.pass-thirukkural strong { display: block; font-size: 9px; line-height: 1.45; font-weight: 800; }
-.pass-thirukkural p { margin: 3px 0; font-size: 9px; line-height: 1.5; font-weight: 800; }
+.pass-thirukkural { margin: 0 18px 12px; padding: 8px 4px 0; border-top: 1px solid var(--line); color: #50370f; text-align: left; font-weight: 800; }
+.pass-thirukkural p { margin: 0; font-size: 10px; line-height: 1.6; font-weight: 800; }
+.pass-thirukkural p span { display: block; white-space: nowrap; }
 .pass-return-note { margin-top: auto; padding: 12px 15px; }
 .pass-return-note p { font-size: 9px; letter-spacing: 0; line-height: 1.9; margin: 0 0 5px; }
 .pass-return-note > span { font-size: 6px; letter-spacing: .2px; }

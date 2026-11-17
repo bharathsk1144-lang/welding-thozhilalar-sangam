@@ -241,7 +241,7 @@ try {
             [1, '.pass-organization-contact dl > div:nth-child(2) dd', 'Tamil Facebook name'],
             [1, '.pass-organization-contact dl > div:nth-child(3) dd', 'YouTube URL'],
             [1, '.pass-organization-contact dl > div:nth-child(4) dd', 'Website URL'],
-            [1, '.pass-thirukkural p', 'Thirukkural 619 Tamil verse']
+            [1, '.pass-thirukkural p', 'Two-line Tamil verse']
           ].map(([side, selector, label]) => {
             const parent = document.querySelector('.card-pair--export [data-card-side=' + (side ? 'back' : 'front') + ']');
             const p = parent.getBoundingClientRect(), r = parent.querySelector(selector).getBoundingClientRect();
@@ -299,11 +299,16 @@ try {
       const verse = back.querySelector('.pass-thirukkural');
       const qr = back.querySelector('.pass-website-qr');
       const footer = back.querySelector('.pass-return-note');
-      return verse?.textContent === 'திருக்குறள் எண்: 619தெய்வத்தான் ஆகா தெனினும் முயற்சிதன்மெய்வருத்தக் கூலி தரும்.அதிகாரம் 62' &&
-        Number(getComputedStyle(verse.querySelector('p')).fontWeight) >= 700 &&
+      const lines = [...verse.querySelectorAll('p span')];
+      return lines.length === 2 && lines[0].textContent === 'தெய்வத்தான் ஆகா தெனினும் முயற்சிதன்' &&
+        lines[1].textContent === 'மெய்வருத்தக் கூலி தரும்.' &&
+        !back.textContent.includes('திருக்குறள் எண்: 619') && !back.textContent.includes('அதிகாரம் 62') &&
+        getComputedStyle(verse).textAlign === 'left' && Number(getComputedStyle(verse.querySelector('p')).fontWeight) >= 700 &&
+        lines.every(line => line.scrollWidth <= line.clientWidth && line.getBoundingClientRect().left === verse.querySelector('p').getBoundingClientRect().left) &&
+        lines[1].getBoundingClientRect().top > lines[0].getBoundingClientRect().top &&
         verse.getBoundingClientRect().top > qr.getBoundingClientRect().bottom &&
         verse.getBoundingClientRect().bottom <= footer.getBoundingClientRect().top;
-    })()`), 'bold Thirukkural 619 fits below the scannable QR and above the footer');
+    })()`), 'exact two-line bold Tamil verse is left-aligned below QR without clipping or footer overlap');
     if (mode === 'corrected-member') {
       assert.equal(await evaluate("document.querySelector('.pass-name dd').textContent"), card.name);
       assert.equal(await evaluate("document.querySelector('.pass-front-fields .pass-field:nth-child(3) dd').textContent"), card.district);

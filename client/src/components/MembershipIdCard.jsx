@@ -73,10 +73,8 @@ const MembershipIdCard = forwardRef(function MembershipIdCard({ card = {} }, ref
           <dl>{organizationContactRows().map(({ label, value }) => <div key={label}><dt><OrganizationContactIcon label={label} /></dt><dd>{value}</dd></div>)}</dl>
           <WebsiteQr />
         </section>
-        <section className="pass-thirukkural" lang="ta" aria-label="திருக்குறள் எண் 619">
-          <strong>திருக்குறள் எண்: 619</strong>
-          <p>தெய்வத்தான் ஆகா தெனினும் முயற்சிதன்<br />மெய்வருத்தக் கூலி தரும்.</p>
-          <strong>அதிகாரம் 62</strong>
+        <section className="pass-thirukkural" lang="ta">
+          <p><span>தெய்வத்தான் ஆகா தெனினும் முயற்சிதன்</span><span>மெய்வருத்தக் கூலி தரும்.</span></p>
         </section>
         <footer className="pass-footer pass-return-note"><p lang="ta">இந்த அட்டை சங்க உறுப்பினர் அடையாளத்திற்கானது. கண்டெடுக்கப்பட்டால் சங்க அலுவலகத்தைத் தொடர்பு கொள்ளவும்.</p><span>Private union membership · Not a government ID</span></footer>
       </article>
