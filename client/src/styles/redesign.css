@@ -123,6 +123,18 @@ input[readonly] { background: #eeeae0; color: #59554c; border-style: dashed; cur
 .dashboard-hero { background: var(--ink); border-top: 3px solid var(--gold); }
 .dashboard-hero .eyebrow { color: #e5b34f; }
 .card-preview { width: 100%; }
+.quick-card-backdrop { position: fixed; inset: 0; z-index: 1000; background: #202124b8; display: grid; place-items: center; padding: 16px; }
+.quick-card-dialog { width: min(100%, 840px); max-height: calc(100dvh - 32px); overflow: auto; background: var(--cream); border: 2px solid var(--gold); border-radius: 10px; padding: 20px; box-shadow: 0 20px 70px #0005; }
+.quick-card-toolbar, .quick-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.quick-card-toolbar { border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 16px; }
+.quick-card-toolbar h2 { margin: 2px 0 0; font-size: 20px; }
+.quick-card-actions button { min-height: 40px; }
+.quick-card-state { text-align: center; padding: 40px 12px; }
+.quick-card-content .card-preview__heading { display: none; }
+.quick-card-content .membership-card.card-pair { gap: 18px; }
+.quick-card-draft-banner { display: block; text-align: center; padding: 8px; margin-bottom: 15px; background: #fff0d3; border: 2px solid #a52b22; color: #802018; font-size: 17px; letter-spacing: .04em; }
+.quick-card-content--draft .member-pass::after { content: 'DRAFT – NOT APPROVED'; position: absolute; top: 46%; left: 50%; z-index: 5; transform: translate(-50%, -50%) rotate(-25deg); width: 115%; padding: 8px 0; background: #fff9e8de; border-top: 2px solid #a52b22; border-bottom: 2px solid #a52b22; color: #802018; text-align: center; font-size: 17px; font-weight: 900; letter-spacing: .02em; pointer-events: none; }
+@media (max-width: 600px) { .quick-card-backdrop { padding: 0; } .quick-card-dialog { max-height: 100dvh; border-radius: 0; padding: 15px; } .quick-card-toolbar h2 { font-size: 17px; } .quick-card-actions { width: 100%; } }
 .card-preview__heading { text-align: center; margin: 30px 0; }
 .card-preview__heading h2 { font-size: 24px; line-height: 1.8; margin: 8px 0; }
 .card-preview__heading p:not(.eyebrow) { color: #6c665b; font-size: 12px; line-height: 1.8; }

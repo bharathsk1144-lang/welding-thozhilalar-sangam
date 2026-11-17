@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell.jsx';
 import MembershipIdCard, { downloadIdCard } from '../components/MembershipIdCard.jsx';
 import { api, privateImage } from '../api/client.js';
@@ -17,6 +17,8 @@ const editValues = (member) => Object.fromEntries(editableFields.map((field) => 
 
 export default function UserDetailsPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const cardRef = useRef(null);
   const [user, setUser] = useState(null);
   const [card, setCard] = useState(null);
@@ -32,7 +34,14 @@ export default function UserDetailsPage() {
   const [cropFile, setCropFile] = useState(null);
 
   useEffect(() => {
-    api.adminUserDetails(id).then(setUser).catch((err) => setError(err.message));
+    api.adminUserDetails(id).then(async (member) => {
+      setUser(member);
+      if (location.state?.startEditing) {
+        setDistricts(await api.getDistricts());
+        setForm(editValues(member));
+        setEditing(true);
+      }
+    }).catch((err) => setError(err.message));
     api.idCard(id).then(setCard).catch(() => {});
   }, [id]);
 
@@ -61,6 +70,10 @@ export default function UserDetailsPage() {
     try {
       await api.adminUpdateUser(id, { ...form, phoneNumber: phone, posting });
       saved = true;
+      if (location.state?.quickPreviewReturn) {
+        navigate('/admin/dashboard', { replace: true, state: { previewMemberId: id } });
+        return;
+      }
       setEditing(false); setForm(null); setCard(null);
       const [updated, updatedCard] = await Promise.all([api.adminUserDetails(id), api.idCard(id)]);
       setUser(updated); setCard(updatedCard);

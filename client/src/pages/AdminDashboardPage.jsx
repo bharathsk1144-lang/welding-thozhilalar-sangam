@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell.jsx';
+import MembershipIdCard from '../components/MembershipIdCard.jsx';
 import { api } from '../api/client.js';
 import { memberIdDisplay } from '../api/memberId.js';
 
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const previewRequest = useRef(0);
+  const closeButton = useRef(null);
+  const [preview, setPreview] = useState(null);
   const [dashboard, setDashboard] = useState({ totalUsers: 0, paymentPendingUsers: 0, pendingApprovalCount: 0, districtCounts: [] });
   const [pendingApprovals, setPendingApprovals] = useState([]);
   const [districts, setDistricts] = useState([]);
@@ -46,9 +51,56 @@ export default function AdminDashboardPage() {
     } catch (err) { setError(err.message); }
   }
 
+  function openPreview(id) {
+    const request = ++previewRequest.current;
+    setPreview({ id, loading: true, card: null, error: '', busy: false });
+    api.idCard(id).then((card) => {
+      if (previewRequest.current === request) setPreview({ id, loading: false, card, error: '', busy: false });
+    }).catch((err) => {
+      if (previewRequest.current === request) setPreview({ id, loading: false, card: null, error: err.message, busy: false });
+    });
+  }
+
+  function closePreview() {
+    previewRequest.current += 1;
+    setPreview(null);
+  }
+
+  async function approvePreview() {
+    if (!preview?.card || preview.card.isApproved || preview.busy) return;
+    const id = preview.id;
+    setPreview((current) => ({ ...current, busy: true, error: '' }));
+    try {
+      await api.decideMemberApproval(id, 'Approved');
+      const card = await api.idCard(id);
+      setPreview((current) => current?.id === id ? { id, card, loading: false, busy: false, error: '' } : current);
+      await loadData();
+      setMessage('Member approved. The ID card preview and user list are updated.');
+    } catch (err) {
+      setPreview((current) => current?.id === id ? { ...current, busy: false, error: err.message } : current);
+    }
+  }
+
   useEffect(() => {
     loadData().catch((err) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    if (location.state?.previewMemberId) {
+      openPreview(location.state.previewMemberId);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.state, location.pathname, navigate]);
+
+  useEffect(() => {
+    if (!preview) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButton.current?.focus();
+    const onKeyDown = (event) => { if (event.key === 'Escape') closePreview(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', onKeyDown); };
+  }, [Boolean(preview)]);
 
   async function handleFilterChange(event) {
     const value = event.target.value;
@@ -221,7 +273,7 @@ export default function AdminDashboardPage() {
                     <td>{memberIdDisplay(user) || '-'}{user.memberIdDisplayWarning && <small role="status">{user.memberIdDisplayWarning}</small>}</td>
                     <td>{new Date(user.createdAt).toLocaleDateString()}</td>
                     <td><span className="status-pill">{user.idCardStatus}</span></td>
-                    <td><Link to={`/admin/users/${user.id}`}>View</Link></td>
+                    <td><Link to={`/admin/users/${user.id}`}>View</Link>{' '}<button type="button" onClick={() => openPreview(user.id)}>Preview ID Card</button></td>
                   </tr>
                 ))}
                 {users.length === 0 && (
@@ -233,6 +285,25 @@ export default function AdminDashboardPage() {
             </table>
           </div>
         </section>
+        {preview && <div className="quick-card-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closePreview(); }}>
+          <section className="quick-card-dialog" role="dialog" aria-modal="true" aria-label="Admin ID Card preview">
+            <div className="quick-card-toolbar">
+              <div><p className="eyebrow">Admin preview</p><h2>ID Card · Front &amp; Back</h2></div>
+              <div className="quick-card-actions">
+                {preview.card && <button type="button" className="secondary" onClick={() => navigate(`/admin/users/${preview.id}`, { state: { startEditing: true, quickPreviewReturn: true } })}>Edit</button>}
+                {preview.card && !preview.card.isApproved && <button type="button" className="primary" disabled={preview.busy} onClick={approvePreview}>{preview.busy ? 'Approving…' : 'Approve'}</button>}
+                <button ref={closeButton} type="button" className="secondary" onClick={closePreview}>Close</button>
+              </div>
+            </div>
+            {preview.loading && <p className="quick-card-state" role="status">Loading ID Card preview…</p>}
+            {preview.error && <div className="notice error" role="alert">{preview.error} <button type="button" onClick={() => openPreview(preview.id)}>Retry</button></div>}
+            {!preview.loading && !preview.error && !preview.card && <p className="quick-card-state">No ID Card data is available for this member.</p>}
+            {preview.card && <div className={`quick-card-content${preview.card.isApproved ? '' : ' quick-card-content--draft'}`}>
+              {!preview.card.isApproved && <strong className="quick-card-draft-banner">DRAFT – NOT APPROVED</strong>}
+              <MembershipIdCard card={preview.card} />
+            </div>}
+          </section>
+        </div>}
 
         <section className="panel data-panel">
           <div className="section-title">

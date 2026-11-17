@@ -378,6 +378,11 @@ try
         Check((await GetWithToken(route, memberToken)).StatusCode == HttpStatusCode.Forbidden, "member token cannot access admin route " + route);
     var admin = await Post("/api/admin/login", new { username = "test-admin", password = "IsolatedAdmin@123" }, HttpStatusCode.OK, "admin login preserved");
     var adminToken = admin["token"]!.GetValue<string>();
+    var adminPendingPreview = await Json(await GetWithToken($"/api/users/{newId}/id-card", adminToken),
+        HttpStatusCode.OK, "admin can preview pending member card");
+    Check(adminPendingPreview["isApproved"]!.GetValue<bool>() == false &&
+        (await GetWithToken($"/api/users/{newId}/id-card", null)).StatusCode == HttpStatusCode.Unauthorized,
+        "pending card preview remains admin-only and unauthenticated access is denied");
     var adminAadhaarView = await Json(await GetWithToken($"/api/admin/users/{newId}", adminToken), HttpStatusCode.OK, "admin sees masked Aadhaar number");
     Check(adminAadhaarView["aadhaarNumberMasked"]!.GetValue<string>() == "•••• •••• 0124" &&
         !adminAadhaarView.ToJsonString().Contains("234567890124") &&
@@ -788,8 +793,9 @@ try
         Check(browserEdited.Name == "Browser Edited Synthetic Member" && browserEdited.District == "Coimbatore" &&
             browserEdited.Posting == "மாவட்ட தலைவர்" &&
             browserEdited.MemberId == beforeEdit.MemberId && browserEdited.CardExpiresAt == beforeEdit.CardExpiresAt &&
-            browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == afterEdit.EditHistory.Count + 2 &&
-            browserEdited.EditHistory[^2].Changes[nameof(UserRegistration.Name)].NewValue == browserEdited.Name,
+            browserEdited.ApprovedAt == beforeEdit.ApprovedAt && browserEdited.EditHistory.Count == afterEdit.EditHistory.Count + 3 &&
+            browserEdited.EditHistory[^3].Changes[nameof(UserRegistration.Name)].NewValue == browserEdited.Name &&
+            browserEdited.PermanentAddress == "Quick preview updated synthetic address",
             "browser save and crop persist audit entries without changing identity or expiry");
     }
     var beforePhoto = await users.Find(u => u.Id == newId).SingleAsync();
