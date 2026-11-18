@@ -20,23 +20,9 @@ public sealed class AdminAuthService
 
     public (string Token, DateTime ExpiresAt)? Login(string username, string password)
     {
-        var isConfiguredUser = string.Equals(username, _settings.Username, StringComparison.OrdinalIgnoreCase);
+        if (!VerifyCredentials(username, password)) return null;
         var isConfiguredEmail = !string.IsNullOrWhiteSpace(_settings.Email) &&
             string.Equals(username, _settings.Email, StringComparison.OrdinalIgnoreCase);
-
-        var validPassword = false;
-        if (!string.IsNullOrEmpty(_settings.PasswordHash))
-        {
-            try { validPassword = new PasswordHasher<AdminSettings>().VerifyHashedPassword(_settings, _settings.PasswordHash, password) != PasswordVerificationResult.Failed; }
-            catch (FormatException) { /* Invalid configuration fails closed. */ }
-            catch (ArgumentException) { /* Invalid hash structure fails closed. */ }
-        }
-        else if (!string.IsNullOrEmpty(_settings.Password))
-            validPassword = CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(password)), SHA256.HashData(Encoding.UTF8.GetBytes(_settings.Password)));
-        if ((!isConfiguredUser && !isConfiguredEmail) || !validPassword)
-        {
-            return null;
-        }
 
         var expiresAt = DateTime.UtcNow.AddHours(_settings.ExpiryHours);
         var adminName = isConfiguredEmail ? _settings.Email : _settings.Username;
@@ -56,5 +42,24 @@ public sealed class AdminAuthService
             signingCredentials: credentials);
 
         return (new JwtSecurityTokenHandler().WriteToken(token), expiresAt);
+    }
+
+    public bool VerifyCredentials(string username, string password)
+    {
+        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password)) return false;
+        var isConfiguredUser = string.Equals(username, _settings.Username, StringComparison.OrdinalIgnoreCase);
+        var isConfiguredEmail = !string.IsNullOrWhiteSpace(_settings.Email) &&
+            string.Equals(username, _settings.Email, StringComparison.OrdinalIgnoreCase);
+
+        var validPassword = false;
+        if (!string.IsNullOrEmpty(_settings.PasswordHash))
+        {
+            try { validPassword = new PasswordHasher<AdminSettings>().VerifyHashedPassword(_settings, _settings.PasswordHash, password) != PasswordVerificationResult.Failed; }
+            catch (FormatException) { /* Invalid configuration fails closed. */ }
+            catch (ArgumentException) { /* Invalid hash structure fails closed. */ }
+        }
+        else if (!string.IsNullOrEmpty(_settings.Password))
+            validPassword = CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(password)), SHA256.HashData(Encoding.UTF8.GetBytes(_settings.Password)));
+        return (isConfiguredUser || isConfiguredEmail) && validPassword;
     }
 }

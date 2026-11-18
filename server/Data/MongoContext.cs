@@ -17,6 +17,7 @@ public sealed class MongoContext
         PrivateUploads = database.GetCollection<PrivateUploadRecord>("PrivateUploads");
         MemberSequences = database.GetCollection<MemberSequence>("MemberSequences");
         WebsiteContents = database.GetCollection<WebsiteContent>("WebsiteContents");
+        AadhaarRevealAudits = database.GetCollection<AadhaarRevealAudit>("AadhaarRevealAudits");
     }
 
     public IMongoCollection<UserRegistration> Users { get; }
@@ -24,6 +25,7 @@ public sealed class MongoContext
     public IMongoCollection<PrivateUploadRecord> PrivateUploads { get; }
     public IMongoCollection<MemberSequence> MemberSequences { get; }
     public IMongoCollection<WebsiteContent> WebsiteContents { get; }
+    public IMongoCollection<AadhaarRevealAudit> AadhaarRevealAudits { get; }
 
     public async Task EnsureIndexesAsync()
     {

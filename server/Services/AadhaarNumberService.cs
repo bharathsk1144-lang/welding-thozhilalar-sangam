@@ -54,6 +54,12 @@ public sealed class AadhaarNumberService
     public string Mask(string? encrypted)
     {
         if (string.IsNullOrEmpty(encrypted)) return string.Empty; // Existing image-only members.
+        var number = Decrypt(encrypted);
+        return "•••• •••• " + number[8..];
+    }
+
+    public string Decrypt(string encrypted)
+    {
         if (!encrypted.StartsWith("v1:", StringComparison.Ordinal)) throw new CryptographicException("Unsupported Aadhaar number format.");
         var bytes = Convert.FromBase64String(encrypted[3..]);
         if (bytes.Length != 40) throw new CryptographicException("Invalid Aadhaar number ciphertext.");
@@ -62,7 +68,9 @@ public sealed class AadhaarNumberService
         {
             using var aes = new AesGcm(_key, 16);
             aes.Decrypt(bytes.AsSpan(0, 12), bytes.AsSpan(28, 12), bytes.AsSpan(12, 16), plaintext);
-            return "•••• •••• " + Encoding.ASCII.GetString(plaintext, 8, 4);
+            var number = Encoding.ASCII.GetString(plaintext);
+            if (!IsValid(number)) throw new CryptographicException("Invalid Aadhaar number plaintext.");
+            return number;
         }
         finally { CryptographicOperations.ZeroMemory(plaintext); }
     }

@@ -139,6 +139,8 @@ export const api = {
   adminUsers: (district) =>
     district ? request(`/users/by-district/${encodeURIComponent(district)}`) : request('/users'),
   adminUserDetails: (id) => request(`/admin/users/${encodeURIComponent(id)}`),
+  revealAdminAadhaar: (id, password, signal) => request(`/admin/users/${encodeURIComponent(id)}/aadhaar/reveal`,
+    { method: 'POST', body: JSON.stringify({ password }), signal, cache: 'no-store' }),
   adminUpdateUser: (id, details) => request(`/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(details) }),
   adminReplacePhoto: (id, photo) => { const body = new FormData(); body.append('photo', photo); return request(`/admin/users/${encodeURIComponent(id)}/profile-photo`, { method: 'POST', body }); },
   adminReviewDocument: (id, details) => request(`/admin/users/${encodeURIComponent(id)}/document-review`, { method: 'PUT', body: JSON.stringify(details) }),

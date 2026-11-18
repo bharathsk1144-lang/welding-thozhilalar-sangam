@@ -32,6 +32,48 @@ export default function UserDetailsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [cropFile, setCropFile] = useState(null);
+  const [aadhaarPassword, setAadhaarPassword] = useState('');
+  const [aadhaarNumber, setAadhaarNumber] = useState('');
+  const [aadhaarError, setAadhaarError] = useState('');
+  const [revealingAadhaar, setRevealingAadhaar] = useState(false);
+  const aadhaarRequest = useRef(null);
+
+  useEffect(() => {
+    const hide = () => {
+      aadhaarRequest.current?.abort();
+      setAadhaarNumber('');
+      setAadhaarPassword('');
+      setRevealingAadhaar(false);
+    };
+    const hideWhenInactive = () => { if (document.hidden) hide(); };
+    window.addEventListener('pagehide', hide);
+    document.addEventListener('visibilitychange', hideWhenInactive);
+    return () => {
+      hide();
+      window.removeEventListener('pagehide', hide);
+      document.removeEventListener('visibilitychange', hideWhenInactive);
+    };
+  }, [id]);
+
+  async function showAadhaar(event) {
+    event.preventDefault();
+    if (!aadhaarPassword || revealingAadhaar) return;
+    const controller = new AbortController();
+    aadhaarRequest.current = controller;
+    const password = aadhaarPassword;
+    setAadhaarPassword('');
+    setAadhaarError('');
+    setRevealingAadhaar(true);
+    try {
+      const result = await api.revealAdminAadhaar(id, password, controller.signal);
+      if (!controller.signal.aborted) setAadhaarNumber({ memberId: id, number: result.aadhaarNumber });
+    } catch (err) {
+      if (!controller.signal.aborted) setAadhaarError(err.message);
+    } finally {
+      if (aadhaarRequest.current === controller) aadhaarRequest.current = null;
+      setRevealingAadhaar(false);
+    }
+  }
 
   useEffect(() => {
     api.adminUserDetails(id).then(async (member) => {
@@ -195,7 +237,18 @@ export default function UserDetailsPage() {
               <Detail label="ID Card Status" value={user.idCardStatus} />
               <Detail label="Status" value={user.status || 'Active Member'} />
               <Detail label="Posting / Responsibility" value={user.posting || 'MEMBER'} />
-              <Detail label="Aadhaar Number (masked)" value={user.aadhaarNumberMasked || (user.aadhaarPhotoPath ? 'Legacy image on file' : 'Not recorded for this member')} />
+              <div className="aadhaar-reveal">
+                <Detail label={aadhaarNumber?.memberId === id ? 'Aadhaar Number (visible)' : 'Aadhaar Number (masked)'} value={(aadhaarNumber?.memberId === id ? aadhaarNumber.number : '') || user.aadhaarNumberMasked || (user.aadhaarPhotoPath ? 'Legacy image on file' : 'Not recorded for this member')} />
+                {user.aadhaarNumberMasked && (aadhaarNumber?.memberId === id ?
+                  <button type="button" onClick={() => setAadhaarNumber('')}>Hide Aadhaar Number</button> :
+                  <form onSubmit={showAadhaar} autoComplete="off">
+                    <label>Confirm admin password to view full number
+                      <input type="password" value={aadhaarPassword} onChange={(event) => setAadhaarPassword(event.target.value)} autoComplete="off" required />
+                    </label>
+                    <button type="submit" disabled={revealingAadhaar}>{revealingAadhaar ? 'Checking…' : 'Show Aadhaar Number'}</button>
+                  </form>)}
+                {aadhaarError && <p role="alert">{aadhaarError}</p>}
+              </div>
               <Detail label="Verification Status" value={user.verificationStatus || 'Pending'} />
               <Detail label="Approval decision by" value={user.approvalDecidedBy} />
               <Detail label="Approval decision at" value={user.approvalDecidedAt ? new Date(user.approvalDecidedAt).toLocaleString() : ''} />

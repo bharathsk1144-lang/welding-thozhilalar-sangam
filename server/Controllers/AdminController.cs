@@ -4,9 +4,12 @@ using Microsoft.AspNetCore.RateLimiting;
 using System.Globalization;
 using System.Text;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using MongoDB.Bson;
 using WeldingThozhilalarSangam.Api.DTOs;
 using WeldingThozhilalarSangam.Api.Services;
+using WeldingThozhilalarSangam.Api.Data;
+using WeldingThozhilalarSangam.Api.Models;
 
 namespace WeldingThozhilalarSangam.Api.Controllers;
 
@@ -17,12 +20,14 @@ public sealed class AdminController : ControllerBase
     private readonly AdminAuthService _adminAuthService;
     private readonly UserService _userService;
     private readonly AadhaarNumberService _aadhaarNumbers;
+    private readonly MongoContext _mongo;
 
-    public AdminController(AdminAuthService adminAuthService, UserService userService, AadhaarNumberService aadhaarNumbers)
+    public AdminController(AdminAuthService adminAuthService, UserService userService, AadhaarNumberService aadhaarNumbers, MongoContext mongo)
     {
         _adminAuthService = adminAuthService;
         _userService = userService;
         _aadhaarNumbers = aadhaarNumbers;
+        _mongo = mongo;
     }
 
     [HttpPost("login")]
@@ -112,6 +117,44 @@ public sealed class AdminController : ControllerBase
             user.DocumentCorrectionRequest) { Posting = PostingPolicy.Display(user.Posting),
                 AadhaarNumberMasked = _aadhaarNumbers.Mask(user.AadhaarNumberCiphertext),
                 ApprovalDecidedAt = user.ApprovalDecidedAt, ApprovalDecidedBy = user.ApprovalDecidedBy }));
+    }
+
+    public sealed record AadhaarRevealRequest(string Password);
+
+    [Authorize(Roles = "Admin")]
+    [HttpPost("users/{id}/aadhaar/reveal")]
+    [EnableRateLimiting("admin-login")]
+    public async Task<IActionResult> RevealAadhaar(string id, [FromBody] AadhaarRevealRequest? request)
+    {
+        Response.Headers.CacheControl = "no-store, private";
+        Response.Headers.Pragma = "no-cache";
+        if (!ObjectId.TryParse(id, out _)) return NotFound();
+        var actor = User.Identity?.Name ?? string.Empty;
+        var valid = request is not null && _adminAuthService.VerifyCredentials(actor, request.Password);
+        if (!valid)
+        {
+            await _mongo.AadhaarRevealAudits.InsertOneAsync(new AadhaarRevealAudit
+                { MemberRecordId = id, AdminName = actor, Result = "Reauthentication failed" });
+            return Unauthorized(new { message = "Admin password is incorrect." });
+        }
+        var member = await _userService.GetByIdAsync(id);
+        if (member is null || string.IsNullOrEmpty(member.AadhaarNumberCiphertext))
+        {
+            await _mongo.AadhaarRevealAudits.InsertOneAsync(new AadhaarRevealAudit
+                { MemberRecordId = id, AdminName = actor, Result = "Number unavailable" });
+            return NotFound(new { message = "Aadhaar number is not recorded for this member." });
+        }
+        string number;
+        try { number = _aadhaarNumbers.Decrypt(member.AadhaarNumberCiphertext); }
+        catch (Exception error) when (error is CryptographicException or FormatException)
+        {
+            await _mongo.AadhaarRevealAudits.InsertOneAsync(new AadhaarRevealAudit
+                { MemberRecordId = id, AdminName = actor, Result = "Decryption failed" });
+            return StatusCode(409, new { message = "Aadhaar number cannot be opened. Contact the system administrator." });
+        }
+        await _mongo.AadhaarRevealAudits.InsertOneAsync(new AadhaarRevealAudit
+            { MemberRecordId = id, AdminName = actor, Result = "Revealed" });
+        return Ok(new { aadhaarNumber = number });
     }
 
     [Authorize]

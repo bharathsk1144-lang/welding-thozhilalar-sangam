@@ -390,6 +390,33 @@ try
         "admin API masks Aadhaar and never returns plaintext or ciphertext");
     Check((await GetWithToken($"/api/admin/users/{newId}", memberToken)).StatusCode == HttpStatusCode.Forbidden,
         "normal member cannot access admin Aadhaar view");
+    async Task<HttpResponseMessage> Reveal(string? token, string password, string memberId = "")
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/admin/users/{(memberId == "" ? newId : memberId)}/aadhaar/reveal")
+            { Content = JsonContent.Create(new { password }) };
+        if (token is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await http.SendAsync(request);
+    }
+    Check((await Reveal(null, "IsolatedAdmin@123")).StatusCode == HttpStatusCode.Unauthorized &&
+        (await Reveal(memberToken, "IsolatedAdmin@123")).StatusCode == HttpStatusCode.Forbidden,
+        "anonymous and member tokens cannot reveal Aadhaar");
+    var wrongReveal = await Reveal(adminToken, "Wrong@123");
+    Check(wrongReveal.StatusCode == HttpStatusCode.Unauthorized &&
+        !(await wrongReveal.Content.ReadAsStringAsync()).Contains("234567890124"),
+        "admin reveal requires fresh correct password");
+    var revealed = await Reveal(adminToken, "IsolatedAdmin@123");
+    var revealedBody = await Json(revealed, HttpStatusCode.OK, "admin reveals synthetic Aadhaar after reauthentication");
+    Check(revealedBody["aadhaarNumber"]!.GetValue<string>() == "234567890124" &&
+        revealed.Headers.CacheControl?.NoStore == true,
+        "reveal returns decryptable synthetic number with no-store header");
+    var revealAudits = await context.AadhaarRevealAudits.Find(a => a.MemberRecordId == newId).ToListAsync();
+    Check(revealAudits.Count == 2 && revealAudits.Any(a => a.Result == "Revealed") &&
+        revealAudits.Any(a => a.Result == "Reauthentication failed") &&
+        revealAudits.All(a => a.AdminName == "test-admin" && a.TimestampUtc <= DateTime.UtcNow &&
+            !a.ToBsonDocument().ToJson().Contains("234567890124")),
+        "audit records success and failed reauthentication without Aadhaar data");
+    Check((await Reveal(adminToken, "IsolatedAdmin@123", legacy.Id!)).StatusCode == HttpStatusCode.NotFound,
+        "legacy image-only records cannot invent missing numbers");
     var publicContent = await Json(await http.GetAsync("/api/website-content"), HttpStatusCode.OK, "public content includes the original constitution");
     Check(publicContent["aboutMarkdown"]!.GetValue<string>().Contains("விதி 30"), "constitution is preserved before first edit");
     async Task<HttpResponseMessage> PutContent(string? bearer, object body)
